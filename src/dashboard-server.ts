@@ -1,9 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { DashboardConfig, getDashboardConfig } from "./dashboard-config.js";
 import * as localStorage from "./local-storage.js";
@@ -43,8 +45,10 @@ type RoundRecordInput = {
 };
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(moduleDir, "..");
 const staticRoot = path.resolve(moduleDir, "..", "public", "dashboard");
 const cookieName = "ai_coding_dashboard_session";
+const execFileAsync = promisify(execFile);
 
 const maxLogFilesReturned = 200;
 const maxLogFilesScanned = 3000;
@@ -214,6 +218,20 @@ async function handleApi(request: IncomingMessage, url: URL, response: ServerRes
       200,
       await bindTokenCandidate(Number(bindTokenCandidateMatch[1]), Number(bindTokenCandidateMatch[2]), body)
     );
+    return;
+  }
+
+  const resetRoundTokenMatch = url.pathname.match(/^\/api\/rounds\/([1-9]\d*)\/token-reset$/);
+  if (resetRoundTokenMatch && request.method === "POST") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await resetRoundToken(Number(resetRoundTokenMatch[1]), body));
+    return;
+  }
+
+  const retryRoundTokenSyncMatch = url.pathname.match(/^\/api\/rounds\/([1-9]\d*)\/token-sync$/);
+  if (retryRoundTokenSyncMatch && request.method === "POST") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await retryRoundTokenSync(Number(retryRoundTokenSyncMatch[1]), body));
     return;
   }
 
@@ -1018,6 +1036,126 @@ async function bindTokenCandidate(roundId: number, candidateId: number, input: R
     tokenSyncStatus: updated.tokenSyncStatus,
     tokenMatchQuality: updated.tokenMatchQuality,
   };
+}
+
+async function resetRoundToken(roundId: number, input: Record<string, unknown>) {
+  const round = await localStorage.getRound(roundId);
+  if (!round) {
+    throw new Error("Round not found");
+  }
+
+  const actor = actorFromInput(input);
+  const reason = reasonFromInput(input) ?? "reset token usage";
+  const before = roundTokenSnapshot(round);
+  const updated: localStorage.Round = {
+    ...round,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    tokenSource: "unavailable",
+    tokenMatchQuality: null,
+    tokenSyncStatus: "pending",
+    tokenSyncedAt: new Date().toISOString(),
+    tokenSyncNote: reason,
+  };
+
+  await localStorage.updateRound(updated);
+  const deletedTokenUsageEvents = await localStorage.deleteTokenUsageEventsByRound(roundId);
+  const deletedTokenUsageCandidates = await localStorage.deleteTokenUsageCandidatesByRound(roundId);
+
+  const correction = await localStorage.createAiCodingCorrection({
+    correctionType: "token_reset",
+    targetType: "round",
+    targetId: roundId,
+    roundId,
+    actor,
+    reason,
+    before,
+    after: {
+      ...roundTokenSnapshot(updated),
+      deletedTokenUsageEvents,
+      deletedTokenUsageCandidates,
+    },
+  });
+
+  return {
+    ok: true,
+    roundId,
+    correctionId: correction.id,
+    deletedTokenUsageEvents,
+    deletedTokenUsageCandidates,
+    tokenSyncStatus: updated.tokenSyncStatus,
+  };
+}
+
+async function retryRoundTokenSync(roundId: number, input: Record<string, unknown>) {
+  const before = await localStorage.getRound(roundId);
+  if (!before) {
+    throw new Error("Round not found");
+  }
+
+  const actor = actorFromInput(input);
+  const reason = reasonFromInput(input) ?? "manual token sync retry";
+  const metadataProjectPath =
+    before.metadata && typeof before.metadata.projectPath === "string" ? before.metadata.projectPath : undefined;
+  const projectPath = typeof input.projectPath === "string" && input.projectPath.trim()
+    ? input.projectPath.trim()
+    : metadataProjectPath;
+
+  const args = [
+    path.join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    path.join(projectRoot, "scripts", "sync-token-usage.ts"),
+    "--round-id",
+    String(roundId),
+  ];
+  if (projectPath) {
+    args.push("--project", projectPath);
+  }
+
+  const { stdout, stderr } = await execFileAsync(process.execPath, args, {
+    cwd: projectRoot,
+    env: process.env,
+    maxBuffer: 20 * 1024 * 1024,
+  });
+
+  const after = await localStorage.getRound(roundId);
+  if (!after) {
+    throw new Error("Round disappeared after token sync");
+  }
+
+  const correction = await localStorage.createAiCodingCorrection({
+    correctionType: "round_update",
+    targetType: "round",
+    targetId: roundId,
+    roundId,
+    actor,
+    reason,
+    before: roundTokenSnapshot(before),
+    after: {
+      ...roundTokenSnapshot(after),
+      stdout: stdout.slice(-4000),
+      stderr: stderr.slice(-4000),
+    },
+  });
+
+  return {
+    ok: true,
+    roundId,
+    correctionId: correction.id,
+    tokenSyncStatus: after.tokenSyncStatus,
+    tokenMatchQuality: after.tokenMatchQuality ?? null,
+    totalTokens: after.totalTokens,
+    stdout: stdout.slice(-4000),
+    stderr: stderr.slice(-4000),
+  };
+}
+
+function actorFromInput(input: Record<string, unknown>): string {
+  return typeof input.actor === "string" && input.actor.trim() ? input.actor.trim() : "dashboard";
+}
+
+function reasonFromInput(input: Record<string, unknown>): string | null {
+  return typeof input.reason === "string" && input.reason.trim() ? input.reason.trim() : null;
 }
 
 function roundTokenSnapshot(round: localStorage.Round): Record<string, unknown> {

@@ -656,6 +656,69 @@ async function deleteRound(roundId = state.editingRoundId) {
   setRoundMessage("已删除");
 }
 
+async function resetRoundToken() {
+  const roundId = state.editingRoundId;
+  if (!roundId) {
+    setRoundMessage("Select a round first.", true);
+    return;
+  }
+
+  const reason = window.prompt("Reason for resetting token data?", "reset incorrect token data");
+  if (reason === null) return;
+
+  setRoundMessage("Resetting token data...");
+  await api(`/api/rounds/${roundId}/token-reset`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      actor: "dashboard",
+      reason
+    })
+  });
+
+  await loadFilters();
+  await loadPageData();
+  renderFilters();
+  const stillVisible = state.rounds.some((row) => row.id === roundId);
+  if (stillVisible) {
+    editRound(roundId);
+  } else {
+    resetRoundForm();
+  }
+  setRoundMessage("Token data reset to pending.");
+}
+
+async function retryRoundTokenSync() {
+  const roundId = state.editingRoundId;
+  if (!roundId) {
+    setRoundMessage("Select a round first.", true);
+    return;
+  }
+
+  setRoundMessage("Running token sync...");
+  const result = await api(`/api/rounds/${roundId}/token-sync`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      actor: "dashboard",
+      reason: "manual token sync retry"
+    })
+  });
+
+  await loadFilters();
+  await loadPageData();
+  renderFilters();
+  const stillVisible = state.rounds.some((row) => row.id === roundId);
+  if (stillVisible) {
+    editRound(roundId);
+  }
+  setRoundMessage(`Token sync finished: ${result.tokenSyncStatus}, ${formatNumber.format(result.totalTokens ?? 0)} tokens.`);
+}
+
 function setRoundMessage(message, isError = false) {
   const element = $("#roundFormMessage");
   if (!element) return;
@@ -900,6 +963,16 @@ function bindRoundEditor() {
   $("#deleteRoundButton").addEventListener("click", () => {
     void deleteRound().catch((error) => {
       setRoundMessage(error instanceof Error ? error.message : "删除失败", true);
+    });
+  });
+  $("#resetTokenButton")?.addEventListener("click", () => {
+    void resetRoundToken().catch((error) => {
+      setRoundMessage(error instanceof Error ? error.message : "Reset token failed", true);
+    });
+  });
+  $("#retryTokenSyncButton")?.addEventListener("click", () => {
+    void retryRoundTokenSync().catch((error) => {
+      setRoundMessage(error instanceof Error ? error.message : "Retry token sync failed", true);
     });
   });
   $("#roundForm").addEventListener("submit", (event) => {

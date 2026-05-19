@@ -268,6 +268,49 @@ try {
     throw new Error(`Unexpected token candidate bind payload: ${JSON.stringify(bindCandidateBody)}`);
   }
 
+  const resetToken = await fetch(`${baseUrl}/api/rounds/${testRoundId}/token-reset`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      actor: "dashboard-api-test",
+      reason: "verify token reset"
+    })
+  });
+
+  if (!resetToken.ok) {
+    throw new Error(`Token reset failed with status ${resetToken.status}: ${await resetToken.text()}`);
+  }
+
+  const resetTokenBody = await resetToken.json();
+  if (resetTokenBody.tokenSyncStatus !== "pending") {
+    throw new Error(`Unexpected token reset payload: ${JSON.stringify(resetTokenBody)}`);
+  }
+
+  const retryTokenSync = await fetch(`${baseUrl}/api/rounds/${testRoundId}/token-sync`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      actor: "dashboard-api-test",
+      reason: "verify token sync retry",
+      projectPath: process.cwd()
+    })
+  });
+
+  if (!retryTokenSync.ok) {
+    throw new Error(`Token sync retry failed with status ${retryTokenSync.status}: ${await retryTokenSync.text()}`);
+  }
+
+  const retryTokenSyncBody = await retryTokenSync.json();
+  if (!["synced", "not_found", "ambiguous", "failed", "pending"].includes(String(retryTokenSyncBody.tokenSyncStatus))) {
+    throw new Error(`Unexpected token sync retry payload: ${JSON.stringify(retryTokenSyncBody)}`);
+  }
+
   const deletedRound = await fetch(`${baseUrl}/api/rounds/${testRoundId}`, {
     method: "DELETE",
     headers: {
