@@ -23,8 +23,10 @@
     "test:verify": "tsx scripts/verify-behavior.ts",
     "test:revert": "tsx scripts/verify-revert.ts",
     "test:dashboard": "tsx scripts/verify-dashboard-api.ts",
+    "test:dashboard:proxy": "tsx scripts/verify-dashboard-api-proxy.ts",
     "test:tokens": "tsx scripts/verify-token-sync.ts",
     "test:code-stats": "tsx scripts/verify-code-change-stats.ts",
+    "test:record-code-stats": "tsx scripts/verify-record-round-code-stats.ts",
     "test:feishu": "tsx scripts/verify-feishu-doc.ts",
     "test:mcp": "tsx scripts/verify-mcp-server.ts",
     "test:decrypt": "tsx scripts/verify-file-decrypt.ts"

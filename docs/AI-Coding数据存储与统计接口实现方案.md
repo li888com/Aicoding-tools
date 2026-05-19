@@ -990,6 +990,14 @@ generatedLinesChanged
 
 `code:stats` 基于 `git diff --numstat` 分类统计 source / doc / config / test / generated / other。执行 `npm run code:stats -- --metadata` 可以输出适合直接写入 MCP metadata 的结构，用于线上按统计口径拆分展示。
 
+当前 `scripts/call-record-round-via-mcp.ts` 已自动读取 `code:stats -- --metadata`，并把 `fileCategorySummary`、`fileCategoryStats` 和文件分类列表写入 round metadata。可用以下命令验证：
+
+```bash
+npm run test:record-code-stats
+```
+
+Dashboard summary 已聚合 `fileCategorySummary`，总览页展示 Source / Docs / Config / Tests / Generated / Other 拆分；需求统计页也会按需求展示 Source / Docs / Tests 简表。旧 round 没有该 metadata 时按 0 处理，不影响既有统计。
+
 ### 11.13 多用户、多项目隔离还需要细化
 
 不足：
@@ -1206,6 +1214,16 @@ P3: 权限隔离 + 完整统计口径 + 脱敏预留
    - 支持选择候选并绑定
    - 绑定后写修正审计
 5. 增加数据修正记录页面或抽屉。
+6. Dashboard 展示接口先通过本地代理接入测试服务：
+   - 浏览器仍请求本地 `/api/summary`、`/api/requirements`、`/api/filters` 等路径。
+   - 本地 Dashboard server 优先转发到 `AI_CODING_DASHBOARD_API_BASE_URL`，当前默认值为 `http://localhost:9906/api/ai-coding/dashboard`。
+   - 后续切线上时只需要改 `AI_CODING_DASHBOARD_API_BASE_URL`，不改前端页面。
+   - 代理会兼容展示接口命名差异：本地 `/api/requirements` 优先请求远端 `/requirements`，失败后尝试 `/by-requirement`；本地 `/api/models` 优先请求远端 `/models`，失败后尝试 `/by-model`。
+   - 远端如果返回 `{ code, msg, data, ok }` 统一响应壳，代理会自动解包 `data`，让前端继续消费原来的数组或对象结构。
+   - 代理会补齐 Dashboard 必需的展示字段默认值，例如 `tokenSyncStatuses`、`tokenPendingRounds`、`tokenCompletenessRate`、`fileCategorySummary`，避免线上测试接口字段暂未完整时页面空白。
+   - 测试服务返回 424、5xx、超时或未启动时，默认回退到本地 JSON 汇总，避免 Dashboard 白屏。
+   - 可通过 `AI_CODING_DASHBOARD_API_FALLBACK_LOCAL=false` 关闭回退，用于线上强校验。
+   - 可通过 `AI_CODING_DASHBOARD_API_TIMEOUT_MS` 调整代理超时时间。
 
 ### 14.3 脚本与自动化任务
 

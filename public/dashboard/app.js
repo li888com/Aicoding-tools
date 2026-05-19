@@ -258,6 +258,7 @@ function renderPage() {
   if ($("#kpiGrid")) renderKpis();
   if ($("#syncStatusPanel")) renderSyncStatus();
   if ($("#tokenQualityGrid")) renderTokenQualityDashboard();
+  if ($("#fileCategoryGrid")) renderFileCategoryDashboard();
   if ($("#requirementChart")) renderRequirementChart();
   if ($("#modelChart")) renderModelChart();
   if ($("#timelineChart")) renderTimeline();
@@ -315,6 +316,26 @@ function renderTokenQualityDashboard() {
     <article class="quality-card">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </article>
+  `).join("");
+}
+
+function renderFileCategoryDashboard() {
+  const summary = state.summary?.fileCategorySummary ?? {};
+  const cards = [
+    ["Source", summary.sourceLinesChanged ?? 0, "Application and script code"],
+    ["Docs", summary.docLinesChanged ?? 0, "Markdown and docs"],
+    ["Config", summary.configLinesChanged ?? 0, "JSON, YAML, env, config"],
+    ["Tests", summary.testLinesChanged ?? 0, "Test and verify files"],
+    ["Generated", summary.generatedLinesChanged ?? 0, "Build, lock, generated files"],
+    ["Other", summary.otherLinesChanged ?? 0, "Unclassified files"]
+  ];
+
+  $("#fileCategoryGrid").innerHTML = cards.map(([label, value, detail]) => `
+    <article class="quality-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(formatNumber.format(Number(value) || 0))}</strong>
       <small>${escapeHtml(detail)}</small>
     </article>
   `).join("");
@@ -526,9 +547,20 @@ function renderRequirementTableDashboard() {
       <td class="number-cell">${formatPercent(row.tokenCompletenessRate)}</td>
       <td class="number-cell">${formatNumber.format(row.tokenPendingRounds ?? 0)}</td>
       <td class="number-cell">${formatNumber.format(row.tokenIssueRounds ?? 0)}</td>
+      <td>${renderFileCategorySummary(row.fileCategorySummary)}</td>
       <td class="number-cell">${formatMetric(row.codeLinesPerKTokens)}</td>
     </tr>
-  `).join("") || emptyRow(12);
+  `).join("") || emptyRow(13);
+}
+
+function renderFileCategorySummary(summary = {}) {
+  const source = Number(summary.sourceLinesChanged ?? 0);
+  const docs = Number(summary.docLinesChanged ?? 0);
+  const tests = Number(summary.testLinesChanged ?? 0);
+  const config = Number(summary.configLinesChanged ?? 0);
+  const generated = Number(summary.generatedLinesChanged ?? 0);
+  const title = `Source ${source} / Docs ${docs} / Config ${config} / Tests ${tests} / Generated ${generated}`;
+  return `<span class="muted-block" title="${escapeHtml(title)}">S ${formatNumber.format(source)} / D ${formatNumber.format(docs)} / T ${formatNumber.format(tests)}</span>`;
 }
 
 function renderModelTable() {

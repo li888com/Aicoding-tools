@@ -15,7 +15,10 @@ const server = createDashboardServer({
   username,
   password,
   sessionSecret: "dashboard-api-test-secret",
-  sessionTtlMs: 60 * 60 * 1000
+  sessionTtlMs: 60 * 60 * 1000,
+  dashboardApiBaseUrl: "http://127.0.0.1:1/api/ai-coding/dashboard",
+  dashboardApiTimeoutMs: 50,
+  dashboardApiFallbackLocal: true
 });
 
 try {
@@ -112,16 +115,31 @@ try {
     "tokenFailedRounds",
     "tokenCompletenessRate",
     "lastTokenSyncedAt",
-    "lastOnlineSyncedAt"
+    "lastOnlineSyncedAt",
+    "fileCategorySummary"
   ]) {
     if (!(key in summary)) {
       throw new Error(`/api/summary is missing ${key}`);
+    }
+  }
+  const fileCategorySummary = summary.fileCategorySummary as Record<string, unknown>;
+  for (const key of ["sourceLinesChanged", "docLinesChanged", "configLinesChanged", "testLinesChanged", "generatedLinesChanged", "otherLinesChanged"]) {
+    if (typeof fileCategorySummary[key] !== "number") {
+      throw new Error(`/api/summary.fileCategorySummary is missing numeric ${key}`);
     }
   }
 
   const filters = results["/api/filters"] as Record<string, unknown>;
   if (!Array.isArray(filters.tokenSyncStatuses)) {
     throw new Error("/api/filters is missing tokenSyncStatuses");
+  }
+
+  const requirements = results["/api/requirements"] as Array<Record<string, unknown>>;
+  if (requirements.length > 0) {
+    const requirementSummary = requirements[0].fileCategorySummary as Record<string, unknown> | undefined;
+    if (!requirementSummary || typeof requirementSummary.sourceLinesChanged !== "number") {
+      throw new Error(`/api/requirements is missing fileCategorySummary: ${JSON.stringify(requirements[0])}`);
+    }
   }
 
   const syncStatus = results["/api/sync-status"] as Record<string, unknown>;

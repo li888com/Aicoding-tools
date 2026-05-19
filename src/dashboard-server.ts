@@ -55,6 +55,14 @@ const maxLogFilesReturned = 200;
 const maxLogFilesScanned = 3000;
 const maxLogTailBytes = 256 * 1024;
 const defaultLogTailBytes = 64 * 1024;
+const dashboardProxyRoutes: Record<string, string[]> = {
+  "/api/filters": ["/filters"],
+  "/api/summary": ["/summary"],
+  "/api/requirements": ["/requirements", "/by-requirement"],
+  "/api/models": ["/models", "/by-model"],
+  "/api/timeline": ["/timeline"],
+  "/api/rounds": ["/rounds"],
+};
 
 const mimeTypes: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -129,7 +137,7 @@ async function routeRequest(
   }
 
   if (url.pathname.startsWith("/api/")) {
-    await handleApi(request, url, response);
+    await handleApi(request, url, response, config);
     return;
   }
 
@@ -142,7 +150,17 @@ async function routeRequest(
   sendJson(response, 405, { error: "method_not_allowed" });
 }
 
-async function handleApi(request: IncomingMessage, url: URL, response: ServerResponse): Promise<void> {
+async function handleApi(
+  request: IncomingMessage,
+  url: URL,
+  response: ServerResponse,
+  config: DashboardConfig
+): Promise<void> {
+  if (request.method === "GET") {
+    const proxied = await proxyDashboardApi(request, url, response, config);
+    if (proxied) return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/filters") {
     sendJson(response, 200, await getFilters());
     return;
@@ -395,6 +413,7 @@ async function getSummary(filters: FilterOptions) {
   let tokenSyncIssueRounds = 0;
   let lastTokenSyncedAt: string | null = null;
   let lastOnlineSyncedAt: string | null = null;
+  const fileCategorySummary = createEmptyFileCategorySummary();
 
   const requirementIds = new Set<number>();
   for (const round of effective) {
@@ -444,6 +463,7 @@ async function getSummary(filters: FilterOptions) {
     if (onlineSyncedAt && (!lastOnlineSyncedAt || new Date(onlineSyncedAt) > new Date(lastOnlineSyncedAt))) {
       lastOnlineSyncedAt = onlineSyncedAt;
     }
+    addFileCategorySummary(fileCategorySummary, round.metadata?.fileCategorySummary);
   }
 
   const revertedRounds = base.reduce((count, round) => count + (revertedRoundIds.has(round.id) ? 1 : 0), 0);
@@ -472,6 +492,29 @@ async function getSummary(filters: FilterOptions) {
     tokenCompletenessRate,
     lastTokenSyncedAt,
     lastOnlineSyncedAt,
+    fileCategorySummary,
+  };
+}
+
+function addFileCategorySummary(target: Record<string, number>, value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  const summary = value as Record<string, unknown>;
+  for (const key of Object.keys(target)) {
+    const amount = Number(summary[key]);
+    if (Number.isFinite(amount)) {
+      target[key] += amount;
+    }
+  }
+}
+
+function createEmptyFileCategorySummary(): Record<string, number> {
+  return {
+    sourceLinesChanged: 0,
+    docLinesChanged: 0,
+    configLinesChanged: 0,
+    testLinesChanged: 0,
+    generatedLinesChanged: 0,
+    otherLinesChanged: 0,
   };
 }
 
@@ -518,6 +561,7 @@ async function getRequirements(filters: FilterOptions) {
       tokenCompletenessRate: number | null;
       lastTokenSyncedAt: string | null;
       codeLinesPerKTokens: number | null;
+      fileCategorySummary: Record<string, number>;
     }
   >();
 
@@ -544,6 +588,7 @@ async function getRequirements(filters: FilterOptions) {
         tokenCompletenessRate: null,
         lastTokenSyncedAt: null,
         codeLinesPerKTokens: null,
+        fileCategorySummary: createEmptyFileCategorySummary(),
       };
       groups.set(reqId, group);
     }
@@ -571,6 +616,7 @@ async function getRequirements(filters: FilterOptions) {
     if (!group.lastEndedAt || new Date(round.endedAt) > new Date(group.lastEndedAt)) {
       group.lastEndedAt = round.endedAt;
     }
+    addFileCategorySummary(group.fileCategorySummary, round.metadata?.fileCategorySummary);
   }
 
   for (const group of groups.values()) {
@@ -1556,6 +1602,198 @@ function sendJson(response: ServerResponse, status: number, body: unknown) {
   response.statusCode = status;
   response.setHeader("Content-Type", "application/json; charset=utf-8");
   response.end(JSON.stringify(body));
+}
+
+async function proxyDashboardApi(
+  request: IncomingMessage,
+  url: URL,
+  response: ServerResponse,
+  config: DashboardConfig
+): Promise<boolean> {
+  const remotePaths = dashboardProxyRoutes[url.pathname];
+  if (!remotePaths) return false;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.dashboardApiTimeoutMs);
+
+  try {
+    const headers = buildProxyHeaders(request);
+    let lastFailure: { targetUrl: string; status: number; body: string } | undefined;
+
+    for (const remotePath of remotePaths) {
+      const targetUrl = `${config.dashboardApiBaseUrl}${remotePath}${url.search}`;
+      const remoteResponse = await fetch(targetUrl, {
+        method: request.method,
+        headers,
+        signal: controller.signal,
+      });
+
+      const body = await remoteResponse.text();
+      if (remoteResponse.ok) {
+        const contentType = remoteResponse.headers.get("content-type") || "application/json; charset=utf-8";
+        const proxiedBody = normalizeDashboardProxyBody(url.pathname, body, contentType);
+        response.statusCode = remoteResponse.status;
+        response.setHeader("Content-Type", contentType);
+        response.end(proxiedBody);
+        return true;
+      }
+
+      lastFailure = {
+        targetUrl,
+        status: remoteResponse.status,
+        body,
+      };
+
+      if (!shouldTryNextDashboardProxyPath(remoteResponse.status)) break;
+    }
+
+    if (config.dashboardApiFallbackLocal) {
+      console.warn(`Dashboard API proxy fallback: ${lastFailure?.targetUrl ?? url.pathname} returned ${lastFailure?.status ?? "unknown"}`);
+      return false;
+    }
+
+    response.statusCode = lastFailure?.status ?? 502;
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.end(lastFailure?.body || JSON.stringify({ error: "dashboard_api_unavailable" }));
+    return true;
+  } catch (error) {
+    if (config.dashboardApiFallbackLocal) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Dashboard API proxy fallback: ${url.pathname} failed: ${message}`);
+      return false;
+    }
+
+    sendJson(response, 502, {
+      error: "dashboard_api_unavailable",
+      message: error instanceof Error ? error.message : "Dashboard API request failed",
+    });
+    return true;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function shouldTryNextDashboardProxyPath(status: number): boolean {
+  return status === 404 || status === 405 || status === 424 || status >= 500;
+}
+
+function normalizeDashboardProxyBody(pathname: string, body: string, contentType: string): string {
+  if (!contentType.toLowerCase().includes("application/json")) return body;
+
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (isDashboardApiEnvelope(parsed)) {
+      return JSON.stringify(normalizeDashboardProxyData(pathname, parsed.data));
+    }
+    return JSON.stringify(normalizeDashboardProxyData(pathname, parsed));
+  } catch {
+    return body;
+  }
+}
+
+function isDashboardApiEnvelope(value: unknown): value is { data: unknown } {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return "data" in record && ("code" in record || "ok" in record || "msg" in record);
+}
+
+function normalizeDashboardProxyData(pathname: string, data: unknown): unknown {
+  if (pathname === "/api/filters" && data && typeof data === "object" && !Array.isArray(data)) {
+    const record = { ...(data as Record<string, unknown>) };
+    if (!Array.isArray(record.tokenSyncStatuses)) {
+      record.tokenSyncStatuses = ["pending", "synced", "not_found", "ambiguous", "failed"];
+    }
+    return record;
+  }
+
+  if (pathname === "/api/summary" && data && typeof data === "object" && !Array.isArray(data)) {
+    const record = { ...(data as Record<string, unknown>) };
+    record.tokenPendingRounds = record.tokenPendingRounds ?? record.tokenMissingRounds ?? 0;
+    record.tokenNotFoundRounds = record.tokenNotFoundRounds ?? 0;
+    record.tokenAmbiguousRounds = record.tokenAmbiguousRounds ?? 0;
+    record.tokenFailedRounds = record.tokenFailedRounds ?? 0;
+    const issueRounds =
+      toNumber(record.tokenNotFoundRounds) + toNumber(record.tokenAmbiguousRounds) + toNumber(record.tokenFailedRounds);
+    record.tokenSyncIssueRounds = record.tokenSyncIssueRounds ?? issueRounds;
+    record.tokenCompletenessRate = record.tokenCompletenessRate ?? calculateCompletenessRate(record.roundCount, record.tokenSyncedRounds);
+    record.lastTokenSyncedAt = record.lastTokenSyncedAt ?? null;
+    record.lastOnlineSyncedAt = record.lastOnlineSyncedAt ?? null;
+    record.fileCategorySummary = record.fileCategorySummary ?? createEmptyFileCategorySummary();
+    return record;
+  }
+
+  if (pathname === "/api/requirements" && Array.isArray(data)) {
+    return data.map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+      const record = { ...(item as Record<string, unknown>) };
+      record.tokenPendingRounds = record.tokenPendingRounds ?? 0;
+      record.tokenIssueRounds = record.tokenIssueRounds ?? 0;
+      record.tokenCompletenessRate = normalizeRequirementCompletenessRate(record);
+      record.lastTokenSyncedAt = record.lastTokenSyncedAt ?? null;
+      record.fileCategorySummary = record.fileCategorySummary ?? createEmptyFileCategorySummary();
+      return record;
+    });
+  }
+
+  return data;
+}
+
+function calculateCompletenessRate(roundCount: unknown, tokenSyncedRounds: unknown): number {
+  const total = toNumber(roundCount);
+  if (total <= 0) return 1;
+
+  return toNumber(tokenSyncedRounds) / total;
+}
+
+function calculateRequirementCompletenessRate(record: Record<string, unknown>): number {
+  if (record.tokenSyncedRounds !== undefined) {
+    return calculateCompletenessRate(record.roundCount, record.tokenSyncedRounds);
+  }
+
+  const total = toNumber(record.roundCount);
+  if (total <= 0) return 1;
+
+  const pending = toNumber(record.tokenPendingRounds);
+  const issues = toNumber(record.tokenIssueRounds);
+  const missing = pending + issues;
+  if (missing > 0) {
+    return Math.max((total - missing) / total, 0);
+  }
+
+  return toNumber(record.totalTokens) > 0 ? 1 : 0;
+}
+
+function normalizeRequirementCompletenessRate(record: Record<string, unknown>): number {
+  const calculated = calculateRequirementCompletenessRate(record);
+  if (record.tokenCompletenessRate === undefined || record.tokenCompletenessRate === null) {
+    return calculated;
+  }
+
+  const provided = toNumber(record.tokenCompletenessRate);
+  const hasNoTokenIssues = toNumber(record.tokenPendingRounds) === 0 && toNumber(record.tokenIssueRounds) === 0;
+  if (provided === 0 && calculated > 0 && hasNoTokenIssues && toNumber(record.totalTokens) > 0) {
+    return calculated;
+  }
+
+  return provided;
+}
+
+function toNumber(value: unknown): number {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function buildProxyHeaders(request: IncomingMessage): Headers {
+  const headers = new Headers();
+  const accept = request.headers.accept;
+  if (accept) headers.set("Accept", Array.isArray(accept) ? accept.join(", ") : accept);
+
+  const authorization = request.headers.authorization;
+  if (authorization) {
+    headers.set("Authorization", Array.isArray(authorization) ? authorization[0] : authorization);
+  }
+
+  return headers;
 }
 
 function redirect(response: ServerResponse, location: string) {
