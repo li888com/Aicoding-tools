@@ -48,6 +48,15 @@ type Round = {
   _sync?: SyncState;
 };
 
+type FileCategorySummary = {
+  sourceLinesChanged: number;
+  docLinesChanged: number;
+  configLinesChanged: number;
+  testLinesChanged: number;
+  generatedLinesChanged: number;
+  otherLinesChanged: number;
+};
+
 type RoundRevert = {
   id: number;
   targetRoundId: number;
@@ -202,6 +211,7 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
     }
 
     const requirement = round.requirementId === null ? undefined : requirementsById.get(round.requirementId);
+    const fileCategorySummary = getFileCategorySummary(round.metadata);
     await uploadItem(
       round,
       report,
@@ -223,6 +233,12 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
           linesAdded: round.linesAdded,
           linesDeleted: round.linesDeleted,
           codeLinesChanged: round.codeLinesChanged,
+          sourceLinesChanged: fileCategorySummary.sourceLinesChanged,
+          docLinesChanged: fileCategorySummary.docLinesChanged,
+          configLinesChanged: fileCategorySummary.configLinesChanged,
+          testLinesChanged: fileCategorySummary.testLinesChanged,
+          generatedLinesChanged: fileCategorySummary.generatedLinesChanged,
+          otherLinesChanged: fileCategorySummary.otherLinesChanged,
           inputTokens: round.inputTokens,
           outputTokens: round.outputTokens,
           totalTokens: round.totalTokens,
@@ -453,6 +469,27 @@ function isTestLikeText(value: string | null | undefined): boolean {
 
 function isLimitReached(report: SyncReport): boolean {
   return report.processed >= args.limit;
+}
+
+function getFileCategorySummary(metadata: Record<string, unknown> | null): FileCategorySummary {
+  const summary = metadata?.fileCategorySummary;
+  const record = summary && typeof summary === "object" && !Array.isArray(summary)
+    ? summary as Record<string, unknown>
+    : {};
+
+  return {
+    sourceLinesChanged: numberValue(record.sourceLinesChanged),
+    docLinesChanged: numberValue(record.docLinesChanged),
+    configLinesChanged: numberValue(record.configLinesChanged),
+    testLinesChanged: numberValue(record.testLinesChanged),
+    generatedLinesChanged: numberValue(record.generatedLinesChanged),
+    otherLinesChanged: numberValue(record.otherLinesChanged),
+  };
+}
+
+function numberValue(value: unknown): number {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function markSynced(item: { _sync?: SyncState }, onlineId?: number): void {

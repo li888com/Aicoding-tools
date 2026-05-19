@@ -473,6 +473,19 @@ GET /api/ai-coding/dashboard/timeline
 GET /api/ai-coding/rounds
 ```
 
+当前后端联调时已经采用并验证以下 Dashboard 展示接口：
+
+```text
+GET /api/ai-coding/dashboard/filters
+GET /api/ai-coding/dashboard/summary
+GET /api/ai-coding/dashboard/requirements
+GET /api/ai-coding/dashboard/models
+GET /api/ai-coding/dashboard/timeline
+GET /api/ai-coding/dashboard/rounds
+```
+
+其中 `requirements/models` 是当前推荐命名；`by-requirement/by-model` 可以作为历史兼容别名保留，但不再作为前端首选路径。
+
 通用筛选参数：
 
 | 参数 | 说明 |
@@ -998,6 +1011,21 @@ npm run test:record-code-stats
 
 Dashboard summary 已聚合 `fileCategorySummary`，总览页展示 Source / Docs / Config / Tests / Generated / Other 拆分；需求统计页也会按需求展示 Source / Docs / Tests 简表。旧 round 没有该 metadata 时按 0 处理，不影响既有统计。
 
+线上同步时，`scripts/sync-to-online.ts` 会把 `metadata.fileCategorySummary` 同步为 `POST /api/ai-coding/rounds` 的顶层字段：
+
+```json
+{
+  "sourceLinesChanged": 0,
+  "docLinesChanged": 0,
+  "configLinesChanged": 0,
+  "testLinesChanged": 0,
+  "generatedLinesChanged": 0,
+  "otherLinesChanged": 0
+}
+```
+
+这样线上 `ai_coding_rounds` 可以在第 7 章原表结构基础上，通过增量列直接聚合代码类型拆分；`metadata` 仍保留完整原始证据。
+
 ### 11.13 多用户、多项目隔离还需要细化
 
 不足：
@@ -1225,6 +1253,14 @@ P3: 权限隔离 + 完整统计口径 + 脱敏预留
    - 可通过 `AI_CODING_DASHBOARD_API_FALLBACK_LOCAL=false` 关闭回退，用于线上强校验。
    - 可通过 `AI_CODING_DASHBOARD_API_TIMEOUT_MS` 调整代理超时时间。
 
+当前 `localhost:9906/api/ai-coding/dashboard` 已完成一次联调验证：
+
+- `filters` 已返回 `tokenSyncStatuses`。
+- `summary` 已返回 `tokenPendingRounds`、`tokenNotFoundRounds`、`tokenAmbiguousRounds`、`tokenFailedRounds`、`tokenCompletenessRate`、`lastTokenSyncedAt`、`lastOnlineSyncedAt`、`fileCategorySummary`。
+- `requirements` 已返回 `tokenPendingRounds`、`tokenIssueRounds`、`tokenCompletenessRate`、`lastTokenSyncedAt`、`fileCategorySummary`。
+- `models`、`timeline`、`rounds` 已可返回 Dashboard 现有页面需要的数据。
+- 仍建议后端把 `totalTokens`、`durationMs`、`inputTokens`、`outputTokens` 等数值字段从字符串改为 JSON number，并把时间字段改为 ISO 8601。
+
 ### 14.3 脚本与自动化任务
 
 1. 完善 `scripts/sync-token-usage.ts`：
@@ -1337,3 +1373,43 @@ powershell -ExecutionPolicy Bypass -File scripts/start-auto-sync.ps1
 2. 测试数据不会上传线上。
 3. 不同项目的数据能按 `projectKey` 或 `projectPath` 区分。
 4. 不同用户的数据能按权限隔离查看。
+
+## 16. 当前落地状态与后续收尾
+
+### 16.1 已落地
+
+MCP Toolbox 本地侧已完成：
+
+1. 每轮记录、撤销记录、需求维护、本地 Dashboard 汇总。
+2. Codex / Claude token 异步回填，支持 `pending`、`synced`、`not_found`、`ambiguous`、`failed` 状态。
+3. `tokens:sync:recent`、`auto-sync`、`sync:online`、失败退避和同步状态展示。
+4. Dashboard 数据质量卡片、需求维度 token 完整率、round 明细筛选和 ambiguous 人工绑定入口。
+5. `code:stats` 分类统计 source / doc / config / test / generated / other，并写入 round metadata。
+6. Dashboard 代理接入 `AI_CODING_DASHBOARD_API_BASE_URL`，当前本地测试地址为 `http://localhost:9906/api/ai-coding/dashboard`。
+
+线上后端侧当前已验证：
+
+1. `/dashboard/filters`、`/dashboard/summary`、`/dashboard/requirements`、`/dashboard/models`、`/dashboard/timeline`、`/dashboard/rounds` 返回 200。
+2. summary 和 requirements 已返回 token 数据质量字段和 `fileCategorySummary`。
+3. 需求 `totalTokens > 0` 且无异常时，`tokenCompletenessRate` 返回 `1.0000`，口径正确。
+4. 已在 `线上存储改造方案.md` 第 7 章原始表结构基础上，准备增量 SQL：`ai_coding_dashboard_compat_20260519.sql`，用于补充代码类型拆分列和 Dashboard 查询索引。
+
+### 16.2 还需要收尾
+
+1. 后端数值字段统一返回 JSON number，避免 `"8000"`、`"930000"` 这类字符串数字。
+2. 后端时间字段统一返回 ISO 8601，例如 `2026-05-19T10:00:00+08:00`。
+3. 执行增量 SQL 后，用真实 MCP 上传一轮带 `fileCategorySummary` 的 round，确认线上 `sourceLinesChanged` 等拆分不再全为 0。
+4. 运行 `npm run test:dashboard:remote` 做远端强校验。该脚本会使用 `AI_CODING_DASHBOARD_API_BASE_URL`，并强制关闭本地兜底，确认 Dashboard 不依赖本地 JSON 汇总也能消费线上接口。
+5. Maven 编译验证时需要处理 `ai-data-biz/src/main/resources/fonts/msyh.ttc` 被资源过滤导致的 `MalformedInputException`，该问题属于工程资源配置，不是 AI Coding 接口代码逻辑。
+
+### 16.3 推荐下一步
+
+优先完成线上写入闭环：
+
+1. 执行 `ai_coding_dashboard_compat_20260519.sql`。
+2. 配置 `SYNC_API_BASE_URL` 和 `SYNC_API_TOKEN`。
+3. 运行 `npm run sync:online:dry` 检查 payload。
+4. 运行 `npm run test:online-sync-file-categories`，确认本地同步脚本会把文件类型拆分作为顶层字段传给线上后端。
+5. 运行 `npm run test:dashboard:remote`，确认 `http://localhost:9906/api/ai-coding/dashboard` 或后续线上地址返回的 summary、requirements、models、timeline、rounds、filters 均符合 Dashboard 需要的数据形状。
+6. 运行 `npm run sync:online` 上传真实数据。
+7. 打开 Dashboard，验证 `#555` 的 round、代码行、token、数据质量和文件类型拆分。
