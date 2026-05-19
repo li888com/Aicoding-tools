@@ -242,6 +242,29 @@ textarea {
   padding: 8px 18px 18px;
 }
 
+.token-candidate-panel {
+  margin: 0 18px 18px;
+  padding: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.compact-heading {
+  padding: 0 0 10px;
+}
+
+.compact-heading h3 {
+  margin: 2px 0 0;
+  font-size: 16px;
+}
+
+.correction-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+}
+
 .requirement-manager-body {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);

@@ -203,6 +203,71 @@ try {
     throw new Error(`Unexpected edited round payload: ${JSON.stringify(editedRoundBody)}`);
   }
 
+  const createdCandidates = await localStorage.replaceTokenUsageCandidates(testRoundId, "codex", [
+    {
+      roundId: testRoundId,
+      client: "codex",
+      sourcePath: "verify-dashboard-api.jsonl",
+      sourceEventId: `candidate-${testRoundId}`,
+      conversationId: "verify-thread",
+      turnId: "verify-turn",
+      modelName: "dashboard-verify-model-edited",
+      startedAt: new Date(Date.now() - 80_000).toISOString(),
+      endedAt: new Date(Date.now() - 20_000).toISOString(),
+      inputTokens: 100,
+      outputTokens: 25,
+      totalTokens: 125,
+      matchQuality: "time_window",
+      note: "temporary dashboard candidate",
+      rawEvent: {
+        verify: true
+      }
+    }
+  ]);
+
+  const candidateList = await fetch(`${baseUrl}/api/rounds/${testRoundId}/token-candidates`, {
+    headers: {
+      Cookie: cookie
+    }
+  });
+
+  if (!candidateList.ok) {
+    throw new Error(`Token candidate list failed with status ${candidateList.status}: ${await candidateList.text()}`);
+  }
+
+  const candidateListBody = await candidateList.json();
+  if (!Array.isArray(candidateListBody.candidates) || candidateListBody.candidates.length === 0) {
+    throw new Error(`Unexpected token candidate payload: ${JSON.stringify(candidateListBody)}`);
+  }
+
+  const bindCandidate = await fetch(
+    `${baseUrl}/api/rounds/${testRoundId}/token-candidates/${createdCandidates[0].id}/bind`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie
+      },
+      body: JSON.stringify({
+        actor: "dashboard-api-test",
+        reason: "verify manual binding"
+      })
+    }
+  );
+
+  if (!bindCandidate.ok) {
+    throw new Error(`Token candidate bind failed with status ${bindCandidate.status}: ${await bindCandidate.text()}`);
+  }
+
+  const bindCandidateBody = await bindCandidate.json();
+  if (
+    bindCandidateBody.tokenSyncStatus !== "synced" ||
+    bindCandidateBody.tokenMatchQuality !== "manual" ||
+    bindCandidateBody.totalTokens !== 125
+  ) {
+    throw new Error(`Unexpected token candidate bind payload: ${JSON.stringify(bindCandidateBody)}`);
+  }
+
   const deletedRound = await fetch(`${baseUrl}/api/rounds/${testRoundId}`, {
     method: "DELETE",
     headers: {
@@ -229,6 +294,9 @@ try {
   console.log(JSON.stringify({ ok: true, pages, endpoints: Object.keys(results) }, null, 2));
 } finally {
   if (testRoundId !== undefined) {
+    await localStorage.deleteTokenUsageEventsByRound(testRoundId).catch(() => undefined);
+    await localStorage.deleteTokenUsageCandidatesByRound(testRoundId).catch(() => undefined);
+    await localStorage.deleteAiCodingCorrectionsByRound(testRoundId).catch(() => undefined);
     await localStorage.deleteRound(testRoundId).catch(() => undefined);
   }
   await localStorage.deleteConversation(testConversationId).catch(() => undefined);

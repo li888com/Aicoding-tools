@@ -111,15 +111,53 @@ type TokenUsageEvent = {
   _sync?: SyncState;
 };
 
+type TokenUsageCandidate = {
+  id: number;
+  roundId: number;
+  client: "codex" | "claude-code";
+  sourcePath: string;
+  sourceEventId: string | null;
+  conversationId: string | null;
+  turnId: string | null;
+  modelName: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  matchQuality: TokenMatchQuality | null;
+  note: string | null;
+  rawEvent: Record<string, unknown> | null;
+  selectedAt: string | null;
+  createdAt: string;
+};
+
+type AiCodingCorrection = {
+  id: number;
+  correctionType: "token_manual_bind" | "token_reset" | "round_update";
+  targetType: "round" | "token_usage_candidate" | "token_usage_event";
+  targetId: number | null;
+  roundId: number | null;
+  actor: string | null;
+  reason: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+};
+
 type StorageData = {
   conversations: Conversation[];
   requirements: Requirement[];
   rounds: Round[];
   roundReverts: RoundRevert[];
   tokenUsageEvents: TokenUsageEvent[];
+  tokenUsageCandidates: TokenUsageCandidate[];
+  aiCodingCorrections: AiCodingCorrection[];
   nextRoundId: number;
   nextRoundRevertId: number;
   nextTokenUsageEventId: number;
+  nextTokenUsageCandidateId: number;
+  nextAiCodingCorrectionId: number;
 };
 
 let storageDir = DEFAULT_STORAGE_DIR;
@@ -187,7 +225,7 @@ async function loadData(forceReload = false): Promise<StorageData> {
     }
 
     const content = await readFile(storagePath, "utf8");
-    cachedData = JSON.parse(content) as StorageData;
+    cachedData = normalizeStorageData(JSON.parse(content));
     lastModified = stats.mtimeMs;
     return cachedData;
   } catch {
@@ -196,7 +234,7 @@ async function loadData(forceReload = false): Promise<StorageData> {
     if (storagePath !== legacyPath) {
       try {
         const legacyContent = await readFile(legacyPath, "utf8");
-        const migrated = JSON.parse(legacyContent) as StorageData;
+        const migrated = normalizeStorageData(JSON.parse(legacyContent));
         await saveData(migrated);
         return migrated;
       } catch {
@@ -211,13 +249,55 @@ async function loadData(forceReload = false): Promise<StorageData> {
       rounds: [],
       roundReverts: [],
       tokenUsageEvents: [],
+      tokenUsageCandidates: [],
+      aiCodingCorrections: [],
       nextRoundId: 1,
       nextRoundRevertId: 1,
       nextTokenUsageEventId: 1,
+      nextTokenUsageCandidateId: 1,
+      nextAiCodingCorrectionId: 1,
     };
     await saveData(emptyData);
     return emptyData;
   }
+}
+
+function normalizeStorageData(value: unknown): StorageData {
+  const data = isRecord(value) ? value : {};
+  const storage = data as Partial<StorageData>;
+
+  storage.conversations = Array.isArray(storage.conversations) ? storage.conversations : [];
+  storage.requirements = Array.isArray(storage.requirements) ? storage.requirements : [];
+  storage.rounds = Array.isArray(storage.rounds) ? storage.rounds : [];
+  storage.roundReverts = Array.isArray(storage.roundReverts) ? storage.roundReverts : [];
+  storage.tokenUsageEvents = Array.isArray(storage.tokenUsageEvents) ? storage.tokenUsageEvents : [];
+  storage.tokenUsageCandidates = Array.isArray(storage.tokenUsageCandidates) ? storage.tokenUsageCandidates : [];
+  storage.aiCodingCorrections = Array.isArray(storage.aiCodingCorrections) ? storage.aiCodingCorrections : [];
+
+  storage.nextRoundId = normalizeNextId(storage.nextRoundId, storage.rounds);
+  storage.nextRoundRevertId = normalizeNextId(storage.nextRoundRevertId, storage.roundReverts);
+  storage.nextTokenUsageEventId = normalizeNextId(storage.nextTokenUsageEventId, storage.tokenUsageEvents);
+  storage.nextTokenUsageCandidateId = normalizeNextId(storage.nextTokenUsageCandidateId, storage.tokenUsageCandidates);
+  storage.nextAiCodingCorrectionId = normalizeNextId(storage.nextAiCodingCorrectionId, storage.aiCodingCorrections);
+
+  return storage as StorageData;
+}
+
+function normalizeNextId(value: unknown, rows: Array<{ id?: unknown }>): number {
+  const parsed = Number(value);
+  if (Number.isSafeInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+
+  const maxId = rows.reduce((max, row) => {
+    const id = Number(row.id);
+    return Number.isSafeInteger(id) && id > max ? id : max;
+  }, 0);
+  return maxId + 1;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function saveData(data: StorageData): Promise<void> {
@@ -239,6 +319,8 @@ export type {
   SyncStatus,
   TokenMatchQuality,
   TokenUsageEvent,
+  TokenUsageCandidate,
+  AiCodingCorrection,
   StorageData
 };
 
@@ -360,6 +442,9 @@ export async function deleteRound(id: number): Promise<boolean> {
     const index = data.rounds.findIndex((r) => r.id === id);
     if (index >= 0) {
       data.rounds.splice(index, 1);
+      data.tokenUsageEvents = data.tokenUsageEvents.filter((event) => event.roundId !== id);
+      data.tokenUsageCandidates = data.tokenUsageCandidates.filter((candidate) => candidate.roundId !== id);
+      data.aiCodingCorrections = data.aiCodingCorrections.filter((correction) => correction.roundId !== id);
       await saveData(data);
       return true;
     }
@@ -419,6 +504,112 @@ export async function createTokenUsageEvent(event: Omit<TokenUsageEvent, "id" | 
   });
 }
 
+export async function deleteTokenUsageEventsByRound(roundId: number): Promise<number> {
+  return withStorageLock(async () => {
+    const data = await loadData(true);
+    const before = data.tokenUsageEvents.length;
+    data.tokenUsageEvents = data.tokenUsageEvents.filter((event) => event.roundId !== roundId);
+    const deleted = before - data.tokenUsageEvents.length;
+    if (deleted > 0) {
+      await saveData(data);
+    }
+    return deleted;
+  });
+}
+
+export async function getTokenUsageCandidates(roundId?: number): Promise<TokenUsageCandidate[]> {
+  const data = await loadData();
+  const candidates = data.tokenUsageCandidates;
+  return roundId === undefined ? candidates : candidates.filter((candidate) => candidate.roundId === roundId);
+}
+
+export async function getTokenUsageCandidate(id: number): Promise<TokenUsageCandidate | undefined> {
+  const data = await loadData();
+  return data.tokenUsageCandidates.find((candidate) => candidate.id === id);
+}
+
+export async function replaceTokenUsageCandidates(
+  roundId: number,
+  client: "codex" | "claude-code",
+  candidates: Array<Omit<TokenUsageCandidate, "id" | "createdAt" | "selectedAt">>
+): Promise<TokenUsageCandidate[]> {
+  return withStorageLock(async () => {
+    const data = await loadData(true);
+    data.tokenUsageCandidates = data.tokenUsageCandidates.filter(
+      (candidate) => !(candidate.roundId === roundId && candidate.client === client && candidate.selectedAt === null)
+    );
+
+    const createdAt = new Date().toISOString();
+    const created = candidates.map((candidate) => {
+      const id = data.nextTokenUsageCandidateId++;
+      return { ...candidate, id, createdAt, selectedAt: null };
+    });
+
+    data.tokenUsageCandidates.push(...created);
+    await saveData(data);
+    return created;
+  });
+}
+
+export async function updateTokenUsageCandidate(candidate: TokenUsageCandidate): Promise<void> {
+  await withStorageLock(async () => {
+    const data = await loadData(true);
+    const index = data.tokenUsageCandidates.findIndex((item) => item.id === candidate.id);
+    if (index >= 0) {
+      data.tokenUsageCandidates[index] = candidate;
+      await saveData(data);
+      return;
+    }
+    throw new Error(`Token usage candidate ${candidate.id} not found`);
+  });
+}
+
+export async function deleteTokenUsageCandidatesByRound(roundId: number): Promise<number> {
+  return withStorageLock(async () => {
+    const data = await loadData(true);
+    const before = data.tokenUsageCandidates.length;
+    data.tokenUsageCandidates = data.tokenUsageCandidates.filter((candidate) => candidate.roundId !== roundId);
+    const deleted = before - data.tokenUsageCandidates.length;
+    if (deleted > 0) {
+      await saveData(data);
+    }
+    return deleted;
+  });
+}
+
+export async function createAiCodingCorrection(
+  correction: Omit<AiCodingCorrection, "id" | "createdAt">
+): Promise<AiCodingCorrection> {
+  return withStorageLock(async () => {
+    const data = await loadData(true);
+    const id = data.nextAiCodingCorrectionId++;
+    const createdAt = new Date().toISOString();
+    const newCorrection: AiCodingCorrection = { ...correction, id, createdAt };
+    data.aiCodingCorrections.push(newCorrection);
+    await saveData(data);
+    return newCorrection;
+  });
+}
+
+export async function getAiCodingCorrections(roundId?: number): Promise<AiCodingCorrection[]> {
+  const data = await loadData();
+  const corrections = data.aiCodingCorrections;
+  return roundId === undefined ? corrections : corrections.filter((correction) => correction.roundId === roundId);
+}
+
+export async function deleteAiCodingCorrectionsByRound(roundId: number): Promise<number> {
+  return withStorageLock(async () => {
+    const data = await loadData(true);
+    const before = data.aiCodingCorrections.length;
+    data.aiCodingCorrections = data.aiCodingCorrections.filter((correction) => correction.roundId !== roundId);
+    const deleted = before - data.aiCodingCorrections.length;
+    if (deleted > 0) {
+      await saveData(data);
+    }
+    return deleted;
+  });
+}
+
 export async function clearAllData(): Promise<void> {
   await withStorageLock(async () => {
     const emptyData: StorageData = {
@@ -427,9 +618,13 @@ export async function clearAllData(): Promise<void> {
       rounds: [],
       roundReverts: [],
       tokenUsageEvents: [],
+      tokenUsageCandidates: [],
+      aiCodingCorrections: [],
       nextRoundId: 1,
       nextRoundRevertId: 1,
       nextTokenUsageEventId: 1,
+      nextTokenUsageCandidateId: 1,
+      nextAiCodingCorrectionId: 1,
     };
     await saveData(emptyData);
   });

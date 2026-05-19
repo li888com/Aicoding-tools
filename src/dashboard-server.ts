@@ -200,6 +200,23 @@ async function handleApi(request: IncomingMessage, url: URL, response: ServerRes
   }
 
   const roundMatch = url.pathname.match(/^\/api\/rounds\/([1-9]\d*)$/);
+  const roundCandidatesMatch = url.pathname.match(/^\/api\/rounds\/([1-9]\d*)\/token-candidates$/);
+  if (roundCandidatesMatch && request.method === "GET") {
+    sendJson(response, 200, await getRoundTokenCandidates(Number(roundCandidatesMatch[1])));
+    return;
+  }
+
+  const bindTokenCandidateMatch = url.pathname.match(/^\/api\/rounds\/([1-9]\d*)\/token-candidates\/([1-9]\d*)\/bind$/);
+  if (bindTokenCandidateMatch && request.method === "POST") {
+    const body = await readJsonBody(request);
+    sendJson(
+      response,
+      200,
+      await bindTokenCandidate(Number(bindTokenCandidateMatch[1]), Number(bindTokenCandidateMatch[2]), body)
+    );
+    return;
+  }
+
   if (roundMatch && request.method === "PUT") {
     const body = await readJsonBody(request);
     sendJson(response, 200, await updateRoundRecord(Number(roundMatch[1]), body));
@@ -857,6 +874,163 @@ async function updateRoundRecord(roundId: number, input: Record<string, unknown>
     outputTokens: updated.outputTokens,
     totalTokens: updated.totalTokens,
     client: getRoundClient(updated),
+  };
+}
+
+async function getRoundTokenCandidates(roundId: number) {
+  const round = await localStorage.getRound(roundId);
+  if (!round) {
+    throw new Error("Round not found");
+  }
+
+  const [candidates, corrections] = await Promise.all([
+    localStorage.getTokenUsageCandidates(roundId),
+    localStorage.getAiCodingCorrections(roundId),
+  ]);
+
+  return {
+    roundId,
+    tokenSyncStatus: round.tokenSyncStatus,
+    tokenMatchQuality: round.tokenMatchQuality ?? null,
+    totalTokens: round.totalTokens,
+    candidates: candidates
+      .slice()
+      .sort((a, b) => {
+        const selectedCompare = Number(Boolean(b.selectedAt)) - Number(Boolean(a.selectedAt));
+        if (selectedCompare !== 0) return selectedCompare;
+        return b.id - a.id;
+      })
+      .map((candidate) => ({
+        id: candidate.id,
+        client: candidate.client,
+        sourcePath: candidate.sourcePath,
+        sourceEventId: candidate.sourceEventId,
+        conversationId: candidate.conversationId,
+        turnId: candidate.turnId,
+        modelName: candidate.modelName,
+        startedAt: candidate.startedAt,
+        endedAt: candidate.endedAt,
+        inputTokens: candidate.inputTokens,
+        outputTokens: candidate.outputTokens,
+        totalTokens: candidate.totalTokens,
+        matchQuality: candidate.matchQuality,
+        note: candidate.note,
+        selectedAt: candidate.selectedAt,
+        createdAt: candidate.createdAt,
+      })),
+    corrections: corrections
+      .slice()
+      .sort((a, b) => b.id - a.id)
+      .slice(0, 20)
+      .map((correction) => ({
+        id: correction.id,
+        correctionType: correction.correctionType,
+        targetType: correction.targetType,
+        targetId: correction.targetId,
+        actor: correction.actor,
+        reason: correction.reason,
+        createdAt: correction.createdAt,
+      })),
+  };
+}
+
+async function bindTokenCandidate(roundId: number, candidateId: number, input: Record<string, unknown>) {
+  const [round, candidate] = await Promise.all([
+    localStorage.getRound(roundId),
+    localStorage.getTokenUsageCandidate(candidateId),
+  ]);
+
+  if (!round) {
+    throw new Error("Round not found");
+  }
+  if (!candidate || candidate.roundId !== roundId) {
+    throw new Error("Token usage candidate not found for this round");
+  }
+
+  const actor = typeof input.actor === "string" && input.actor.trim() ? input.actor.trim() : "dashboard";
+  const reason = typeof input.reason === "string" && input.reason.trim() ? input.reason.trim() : null;
+  const now = new Date().toISOString();
+  const tokenSource = candidate.client === "claude-code" ? "claude_jsonl" : "codex_log";
+
+  const before = roundTokenSnapshot(round);
+  const updated: localStorage.Round = {
+    ...round,
+    inputTokens: candidate.inputTokens,
+    outputTokens: candidate.outputTokens,
+    totalTokens: candidate.totalTokens,
+    modelName: candidate.modelName ?? round.modelName,
+    tokenSource,
+    tokenMatchQuality: "manual",
+    tokenSyncStatus: "synced",
+    tokenSyncedAt: now,
+    tokenSyncNote: `Manually bound candidate ${candidate.id}${reason ? `: ${reason}` : ""}`,
+  };
+  await localStorage.updateRound(updated);
+
+  const event = await localStorage.createTokenUsageEvent({
+    roundId,
+    client: candidate.client,
+    sourcePath: candidate.sourcePath,
+    sourceEventId: candidate.sourceEventId,
+    conversationId: candidate.conversationId,
+    turnId: candidate.turnId,
+    modelName: candidate.modelName,
+    startedAt: candidate.startedAt,
+    endedAt: candidate.endedAt,
+    inputTokens: candidate.inputTokens,
+    outputTokens: candidate.outputTokens,
+    totalTokens: candidate.totalTokens,
+    matchQuality: "manual",
+    rawEvent: {
+      ...(candidate.rawEvent || {}),
+      manualBindCandidateId: candidate.id,
+      originalMatchQuality: candidate.matchQuality,
+    },
+  });
+
+  await localStorage.updateTokenUsageCandidate({
+    ...candidate,
+    selectedAt: now,
+  });
+
+  const correction = await localStorage.createAiCodingCorrection({
+    correctionType: "token_manual_bind",
+    targetType: "token_usage_candidate",
+    targetId: candidate.id,
+    roundId,
+    actor,
+    reason,
+    before,
+    after: {
+      ...roundTokenSnapshot(updated),
+      tokenUsageEventId: event.id,
+      tokenUsageCandidateId: candidate.id,
+    },
+  });
+
+  return {
+    ok: true,
+    roundId,
+    candidateId,
+    tokenUsageEventId: event.id,
+    correctionId: correction.id,
+    totalTokens: updated.totalTokens,
+    tokenSyncStatus: updated.tokenSyncStatus,
+    tokenMatchQuality: updated.tokenMatchQuality,
+  };
+}
+
+function roundTokenSnapshot(round: localStorage.Round): Record<string, unknown> {
+  return {
+    inputTokens: round.inputTokens,
+    outputTokens: round.outputTokens,
+    totalTokens: round.totalTokens,
+    modelName: round.modelName,
+    tokenSource: round.tokenSource,
+    tokenMatchQuality: round.tokenMatchQuality ?? null,
+    tokenSyncStatus: round.tokenSyncStatus,
+    tokenSyncedAt: round.tokenSyncedAt,
+    tokenSyncNote: round.tokenSyncNote,
   };
 }
 

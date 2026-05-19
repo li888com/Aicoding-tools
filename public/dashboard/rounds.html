@@ -95,6 +95,32 @@
             <button id="deleteRoundButton" class="danger-button" type="button">删除对话</button>
           </div>
         </form>
+        <section id="tokenCandidatePanel" class="token-candidate-panel" aria-label="Token candidates">
+          <div class="panel-heading compact-heading">
+            <div>
+              <p class="eyebrow">Token Candidates</p>
+              <h3>Manual Binding</h3>
+            </div>
+          </div>
+          <p id="tokenCandidateMessage" class="form-message">Select an ambiguous round to review token candidates.</p>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Client</th>
+                  <th>Tokens</th>
+                  <th>Quality</th>
+                  <th>Turn</th>
+                  <th>Time</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="tokenCandidatesTable"></tbody>
+            </table>
+          </div>
+          <div id="tokenCorrectionList" class="correction-list"></div>
+        </section>
       </section>
       <article class="panel">
         <div class="panel-heading">

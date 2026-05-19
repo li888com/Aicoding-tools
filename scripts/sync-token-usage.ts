@@ -146,6 +146,7 @@ async function syncRound(round: RoundRow, client: ClientName, args: Args): Promi
     }
 
     if (candidates.length > 1) {
+      await saveCandidates(round.id, client, candidates, args.dryRun);
       await markRound(round.id, "ambiguous", `${candidates.length} ${client} token usage events matched`, args.dryRun);
       return { roundId: round.id, status: "ambiguous", client, note: `${candidates.length} candidates` };
     }
@@ -170,6 +171,37 @@ async function syncRound(round: RoundRow, client: ClientName, args: Args): Promi
     await markRound(round.id, "failed", note, args.dryRun);
     return { roundId: round.id, status: "failed", client, note };
   }
+}
+
+async function saveCandidates(
+  roundId: number,
+  client: ClientName,
+  candidates: RoundCandidate[],
+  dryRun: boolean
+): Promise<void> {
+  if (dryRun) return;
+
+  await localStorage.replaceTokenUsageCandidates(
+    roundId,
+    client,
+    candidates.slice(0, 20).map((candidate) => ({
+      roundId,
+      client,
+      sourcePath: candidate.sourcePath,
+      sourceEventId: candidate.sourceEventId,
+      conversationId: candidate.conversationId ?? null,
+      turnId: candidate.turnId ?? null,
+      modelName: candidate.modelName ?? null,
+      startedAt: candidate.startedAt ? candidate.startedAt.toISOString() : null,
+      endedAt: candidate.endedAt ? candidate.endedAt.toISOString() : null,
+      inputTokens: candidate.inputTokens,
+      outputTokens: candidate.outputTokens,
+      totalTokens: candidate.totalTokens,
+      matchQuality: candidate.matchQuality ?? null,
+      note: candidate.note ?? null,
+      rawEvent: candidate.rawEvent ?? null,
+    }))
+  );
 }
 
 async function findExistingTokenEventRound(

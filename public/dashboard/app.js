@@ -591,12 +591,14 @@ function editRound(roundId) {
   $("#roundTotalTokensInput").value = String(record.totalTokens ?? 0);
   $("#roundPromptInput").value = record.promptText || "";
   setRoundMessage("");
+  void loadTokenCandidates(roundId);
 }
 
 function resetRoundForm() {
   state.editingRoundId = null;
   $("#roundForm")?.reset();
   $("#roundIdInput").value = "";
+  renderTokenCandidates(null);
   setRoundMessage("选择表格中的对话后可编辑");
 }
 
@@ -659,6 +661,85 @@ function setRoundMessage(message, isError = false) {
   if (!element) return;
   element.textContent = message;
   element.classList.toggle("form-error", isError);
+}
+
+async function loadTokenCandidates(roundId) {
+  if (!$("#tokenCandidatesTable")) return;
+  $("#tokenCandidateMessage").textContent = "Loading token candidates...";
+  const payload = await api(`/api/rounds/${roundId}/token-candidates`);
+  renderTokenCandidates(payload);
+}
+
+function renderTokenCandidates(payload) {
+  const table = $("#tokenCandidatesTable");
+  if (!table) return;
+
+  if (!payload) {
+    $("#tokenCandidateMessage").textContent = "Select an ambiguous round to review token candidates.";
+    table.innerHTML = emptyRow(7);
+    $("#tokenCorrectionList").innerHTML = "";
+    return;
+  }
+
+  const candidates = payload.candidates ?? [];
+  $("#tokenCandidateMessage").textContent = candidates.length > 0
+    ? `${candidates.length} candidate(s), current status: ${payload.tokenSyncStatus}`
+    : `No token candidates for round #${payload.roundId}`;
+
+  table.innerHTML = candidates.map((candidate) => `
+    <tr>
+      <td class="number-cell">${candidate.id}</td>
+      <td>${escapeHtml(candidate.client)}</td>
+      <td class="number-cell">${formatNumber.format(candidate.totalTokens ?? 0)}</td>
+      <td>${escapeHtml(candidate.matchQuality || "-")}</td>
+      <td class="prompt-cell" title="${escapeHtml(candidate.turnId || "")}">${escapeHtml(candidate.turnId || "-")}</td>
+      <td class="number-cell">${formatDate(candidate.startedAt)}</td>
+      <td>
+        ${candidate.selectedAt
+          ? `<span class="status-pill">selected</span>`
+          : `<button class="link-button" type="button" data-bind-token-candidate="${candidate.id}">Bind</button>`}
+      </td>
+    </tr>
+  `).join("") || emptyRow(7);
+
+  const corrections = payload.corrections ?? [];
+  $("#tokenCorrectionList").innerHTML = corrections.map((correction) => `
+    <small class="muted-block">
+      #${correction.id} ${escapeHtml(correction.correctionType)} by ${escapeHtml(correction.actor || "-")}
+      ${escapeHtml(formatDate(correction.createdAt))}
+      ${correction.reason ? ` / ${escapeHtml(correction.reason)}` : ""}
+    </small>
+  `).join("");
+}
+
+async function bindTokenCandidate(candidateId) {
+  const roundId = state.editingRoundId;
+  if (!roundId) return;
+
+  const reason = window.prompt("Reason for manual token binding?", "manual ambiguous resolution");
+  if (reason === null) return;
+
+  $("#tokenCandidateMessage").textContent = "Binding token candidate...";
+  await api(`/api/rounds/${roundId}/token-candidates/${candidateId}/bind`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      actor: "dashboard",
+      reason
+    })
+  });
+
+  await loadFilters();
+  await loadPageData();
+  renderFilters();
+  const stillVisible = state.rounds.some((row) => row.id === roundId);
+  if (stillVisible) {
+    editRound(roundId);
+  } else {
+    renderTokenCandidates(null);
+  }
 }
 
 function editRequirement(requirementId) {
@@ -839,6 +920,13 @@ function bindRoundEditor() {
         setRoundMessage(error instanceof Error ? error.message : "删除失败", true);
       });
     }
+  });
+  $("#tokenCandidatesTable")?.addEventListener("click", (event) => {
+    const bindButton = event.target.closest("[data-bind-token-candidate]");
+    if (!bindButton) return;
+    void bindTokenCandidate(Number(bindButton.dataset.bindTokenCandidate)).catch((error) => {
+      $("#tokenCandidateMessage").textContent = error instanceof Error ? error.message : "Bind failed";
+    });
   });
   resetRoundForm();
 }
