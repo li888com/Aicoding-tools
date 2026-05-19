@@ -150,6 +150,7 @@ type AutoSyncState = {
   status: "idle" | "running" | "stopped" | "failed";
   startedAt: string | null;
   lastHeartbeatAt: string | null;
+  lastTokenSyncSince: string | null;
   lastTokenSyncAt: string | null;
   lastOnlineSyncAt: string | null;
   lastTokenSyncStatus: string | null;
@@ -290,7 +291,7 @@ function normalizeStorageData(value: unknown): StorageData {
   storage.tokenUsageEvents = Array.isArray(storage.tokenUsageEvents) ? storage.tokenUsageEvents : [];
   storage.tokenUsageCandidates = Array.isArray(storage.tokenUsageCandidates) ? storage.tokenUsageCandidates : [];
   storage.aiCodingCorrections = Array.isArray(storage.aiCodingCorrections) ? storage.aiCodingCorrections : [];
-  storage.autoSyncState = isRecord(storage.autoSyncState) ? storage.autoSyncState as AutoSyncState : null;
+  storage.autoSyncState = normalizeAutoSyncState(storage.autoSyncState);
 
   storage.nextRoundId = normalizeNextId(storage.nextRoundId, storage.rounds);
   storage.nextRoundRevertId = normalizeNextId(storage.nextRoundRevertId, storage.roundReverts);
@@ -312,6 +313,27 @@ function normalizeNextId(value: unknown, rows: Array<{ id?: unknown }>): number 
     return Number.isSafeInteger(id) && id > max ? id : max;
   }, 0);
   return maxId + 1;
+}
+
+function normalizeAutoSyncState(value: unknown): AutoSyncState | null {
+  if (!isRecord(value)) return null;
+  return {
+    workerId: typeof value.workerId === "string" ? value.workerId : null,
+    status: ["idle", "running", "stopped", "failed"].includes(String(value.status))
+      ? value.status as AutoSyncState["status"]
+      : "idle",
+    startedAt: typeof value.startedAt === "string" ? value.startedAt : null,
+    lastHeartbeatAt: typeof value.lastHeartbeatAt === "string" ? value.lastHeartbeatAt : null,
+    lastTokenSyncSince: typeof value.lastTokenSyncSince === "string" ? value.lastTokenSyncSince : null,
+    lastTokenSyncAt: typeof value.lastTokenSyncAt === "string" ? value.lastTokenSyncAt : null,
+    lastOnlineSyncAt: typeof value.lastOnlineSyncAt === "string" ? value.lastOnlineSyncAt : null,
+    lastTokenSyncStatus: typeof value.lastTokenSyncStatus === "string" ? value.lastTokenSyncStatus : null,
+    lastOnlineSyncStatus: typeof value.lastOnlineSyncStatus === "string" ? value.lastOnlineSyncStatus : null,
+    lastTokenSyncSummary: isRecord(value.lastTokenSyncSummary) ? value.lastTokenSyncSummary : null,
+    lastOnlineSyncSummary: isRecord(value.lastOnlineSyncSummary) ? value.lastOnlineSyncSummary : null,
+    lastError: typeof value.lastError === "string" ? value.lastError : null,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -638,6 +660,7 @@ export async function patchAutoSyncState(patch: Partial<AutoSyncState>): Promise
       status: "idle",
       startedAt: null,
       lastHeartbeatAt: null,
+      lastTokenSyncSince: null,
       lastTokenSyncAt: null,
       lastOnlineSyncAt: null,
       lastTokenSyncStatus: null,

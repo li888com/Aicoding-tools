@@ -178,7 +178,7 @@ textarea {
 
 .sync-status-card {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
   gap: 14px;
   padding: 16px 18px;
   background: var(--surface);

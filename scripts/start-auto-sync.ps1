@@ -1,7 +1,8 @@
 param(
   [int]$TokenIntervalMs = 180000,
   [int]$OnlineIntervalMs = 600000,
-  [int]$SinceHours = 24
+  [int]$SinceHours = 24,
+  [int]$LookbackMs = 1800000
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,7 @@ Set-Location '$ProjectRoot'
 `$env:AUTO_SYNC_TOKEN_INTERVAL_MS='$TokenIntervalMs'
 `$env:AUTO_SYNC_ONLINE_INTERVAL_MS='$OnlineIntervalMs'
 `$env:AUTO_SYNC_SINCE_HOURS='$SinceHours'
+`$env:AUTO_SYNC_LOOKBACK_MS='$LookbackMs'
 npm run auto-sync *>&1 | Tee-Object -FilePath '$LogPath' -Append
 "@
 

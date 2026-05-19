@@ -1197,7 +1197,10 @@ npm run auto-sync:once
 AUTO_SYNC_TOKEN_INTERVAL_MS = 180000
 AUTO_SYNC_ONLINE_INTERVAL_MS = 600000
 AUTO_SYNC_SINCE_HOURS = 24
+AUTO_SYNC_LOOKBACK_MS = 1800000
 ```
+
+`AUTO_SYNC_SINCE_HOURS` 是兜底扫描窗口。worker 已有上次成功 token sync 时间时，会优先用 checkpoint，并向前回看 `AUTO_SYNC_LOOKBACK_MS`，避免日志落盘延迟导致漏扫。
 
 Windows 本地可用以下脚本后台启动：
 
@@ -1208,6 +1211,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start-auto-sync.ps1
 运行状态会写入本地 `autoSyncState`，Dashboard 通过 `/api/sync-status` 展示：
 
 - worker 是否运行
+- 本轮 token 扫描起点
 - 最近 token sync 时间
 - 最近 online sync 时间
 - 最近错误

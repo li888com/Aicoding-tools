@@ -126,6 +126,10 @@ try {
   if (!("running" in syncStatus) || !("state" in syncStatus)) {
     throw new Error(`/api/sync-status returned unexpected payload: ${JSON.stringify(syncStatus)}`);
   }
+  const syncState = syncStatus.state as Record<string, unknown> | null;
+  if (syncState && !("lastTokenSyncSince" in syncState)) {
+    throw new Error(`/api/sync-status state is missing lastTokenSyncSince: ${JSON.stringify(syncStatus)}`);
+  }
 
   const saved = await fetch(`${baseUrl}/api/requirement-records/${testRequirementId}`, {
     method: "PUT",

@@ -9,6 +9,7 @@ type Args = {
   tokenIntervalMs: number;
   onlineIntervalMs: number;
   sinceHours: number;
+  lookbackMs: number;
   once: boolean;
 };
 
@@ -91,20 +92,41 @@ async function main(): Promise<void> {
 }
 
 async function runTokenSync(): Promise<void> {
-  const since = new Date(Date.now() - args.sinceHours * 60 * 60 * 1000).toISOString();
+  const { since, source } = await computeTokenSince();
   const result = await runScript("scripts/sync-token-usage.ts", ["--project", projectRoot, "--since", since]);
   const parsed = parseJsonOutput(result.stdout);
   await localStorage.patchAutoSyncState({
     workerId,
+    lastTokenSyncSince: since,
     lastTokenSyncAt: new Date().toISOString(),
     lastTokenSyncStatus: result.ok ? "ok" : "failed",
     lastTokenSyncSummary: {
       ...parsed,
+      since,
+      checkpointSource: source,
       exitCode: result.exitCode,
       stderr: result.stderr.slice(-2000),
     },
     lastError: result.ok ? null : result.stderr || result.stdout || `token sync exited ${result.exitCode}`,
   });
+}
+
+async function computeTokenSince(): Promise<{ since: string; source: "checkpoint" | "fallback" }> {
+  const fallbackMs = Date.now() - args.sinceHours * 60 * 60 * 1000;
+  const state = await localStorage.getAutoSyncState();
+  const checkpointMs = state?.lastTokenSyncAt ? new Date(state.lastTokenSyncAt).getTime() - args.lookbackMs : NaN;
+
+  if (Number.isFinite(checkpointMs)) {
+    return {
+      since: new Date(Math.max(fallbackMs, checkpointMs)).toISOString(),
+      source: "checkpoint",
+    };
+  }
+
+  return {
+    since: new Date(fallbackMs).toISOString(),
+    source: "fallback",
+  };
 }
 
 async function runOnlineSync(): Promise<void> {
@@ -184,6 +206,7 @@ function parseArgs(argv: string[]): Args {
     tokenIntervalMs: readNumberEnv("AUTO_SYNC_TOKEN_INTERVAL_MS", 3 * 60 * 1000),
     onlineIntervalMs: readNumberEnv("AUTO_SYNC_ONLINE_INTERVAL_MS", 10 * 60 * 1000),
     sinceHours: readNumberEnv("AUTO_SYNC_SINCE_HOURS", 24),
+    lookbackMs: readNumberEnv("AUTO_SYNC_LOOKBACK_MS", 30 * 60 * 1000),
     once: false,
   };
 
@@ -198,6 +221,9 @@ function parseArgs(argv: string[]): Args {
       index += 1;
     } else if (arg === "--since-hours" && next) {
       parsed.sinceHours = Number(next);
+      index += 1;
+    } else if (arg === "--lookback-ms" && next) {
+      parsed.lookbackMs = Number(next);
       index += 1;
     } else if (arg === "--once") {
       parsed.once = true;

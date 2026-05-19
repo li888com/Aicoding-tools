@@ -301,6 +301,7 @@ function renderSyncStatus() {
   const syncState = payload.state ?? {};
   const status = payload.running ? "运行中" : payload.stale ? "心跳过期" : syncState.status || "未运行";
   const lastToken = syncState.lastTokenSyncAt ? formatDate(syncState.lastTokenSyncAt) : "-";
+  const tokenSince = syncState.lastTokenSyncSince ? formatDate(syncState.lastTokenSyncSince) : "-";
   const lastOnline = syncState.lastOnlineSyncAt ? formatDate(syncState.lastOnlineSyncAt) : "-";
   const error = syncState.lastError || "";
 
@@ -313,6 +314,10 @@ function renderSyncStatus() {
       <div>
         <span>Token Sync</span>
         <strong>${escapeHtml(lastToken)}</strong>
+      </div>
+      <div>
+        <span>Scan Since</span>
+        <strong>${escapeHtml(tokenSince)}</strong>
       </div>
       <div>
         <span>Online Sync</span>
