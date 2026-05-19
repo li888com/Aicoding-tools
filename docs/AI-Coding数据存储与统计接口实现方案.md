@@ -560,7 +560,20 @@ SYNC_API_TOKEN=xxx
 MCP_TOOLBOX_STORAGE_DIR=.mcp-toolbox
 ```
 
-同步必须支持断点续传。某一条失败不能影响后续记录，失败项保留 `_sync.status=failed`，下次可重试。
+同步必须支持断点续传。某一条失败不能影响后续记录，失败项保留 `_sync.status=failed`，并记录：
+
+```text
+_sync.failedAttempts
+_sync.lastAttemptAt
+_sync.nextRetryAt
+_sync.error
+```
+
+默认失败重试使用指数退避，避免后台任务高频重复撞同一条失败数据。需要立即重试时可执行：
+
+```bash
+npm run sync:online -- --retry-failed-now
+```
 
 ## 9. 实施步骤
 
@@ -963,15 +976,19 @@ ai_coding_corrections
 | 撤销 round | 默认从有效统计中排除，不做负数抵消 |
 | token pending round | 轮次数和代码行数计入，token 指标按 0 并展示 pending |
 
-后续可以增加文件类型维度：
+本地已提供文件类型维度统计脚本：
 
 ```text
+npm run code:stats
+
 sourceLinesChanged
 docLinesChanged
 configLinesChanged
 testLinesChanged
 generatedLinesChanged
 ```
+
+`code:stats` 基于 `git diff --numstat` 分类统计 source / doc / config / test / generated / other。执行 `npm run code:stats -- --metadata` 可以输出适合直接写入 MCP metadata 的结构，用于线上按统计口径拆分展示。
 
 ### 11.13 多用户、多项目隔离还需要细化
 
@@ -1197,11 +1214,11 @@ P3: 权限隔离 + 完整统计口径 + 脱敏预留
    - 支持进程锁
    - 支持 `tokenMatchQuality`
    - 支持最近 24 小时增量扫描
-2. 增加 `npm run tokens:sync:recent`。
+2. 增加 `npm run tokens:sync:recent`。当前已落地，默认同步当前项目最近 24 小时、最多 200 条 pending / failed / not_found round。
 3. 完善 `scripts/sync-to-online.ts`：
-   - 上传前跳过测试数据
+   - 上传前跳过测试数据。当前已支持跳过 `#999 token sync verification`、Dashboard API 验证 round、`metadata.skipOnlineSync=true` 和 `metadata.testData=true`
    - 支持 token event 幂等上传
-   - 支持失败重试和 `_sync.error`
+   - 支持失败重试和 `_sync.error`。当前已支持 `failedAttempts`、`lastAttemptAt`、`nextRetryAt` 和 `--retry-failed-now`
 4. 增加后台自动同步脚本：
    - 每 2-5 分钟 token sync
    - 每 5-10 分钟 sync online
@@ -1211,6 +1228,7 @@ P3: 权限隔离 + 完整统计口径 + 脱敏预留
 当前已落地的自动化入口：
 
 ```bash
+npm run tokens:sync:recent
 npm run auto-sync
 npm run auto-sync:once
 ```
@@ -1244,6 +1262,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start-auto-sync.ps1
 - 最近 online sync 时间
 - 最近错误
 - 未配置 `SYNC_API_TOKEN` 时，online sync 显示为 `skipped`，不按失败处理
+- 总览页的业务统计接口不能被同步状态接口阻塞；`/api/sync-status` 失败时只显示同步状态不可用，不影响 KPI 和图表渲染。
 
 ### 14.4 运维任务
 

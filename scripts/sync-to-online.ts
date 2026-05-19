@@ -9,6 +9,9 @@ type SyncState = {
   onlineId?: number;
   syncedAt?: string;
   error?: string;
+  failedAttempts?: number;
+  lastAttemptAt?: string;
+  nextRetryAt?: string;
 };
 
 type Requirement = {
@@ -102,6 +105,8 @@ type SyncReport = {
   rounds: number;
   roundReverts: number;
   tokenUsageEvents: number;
+  testDataSkipped: number;
+  retryDeferred: number;
   skipped: number;
   failed: number;
   processed: number;
@@ -127,6 +132,8 @@ async function main(): Promise<void> {
     rounds: 0,
     roundReverts: 0,
     tokenUsageEvents: 0,
+    testDataSkipped: 0,
+    retryDeferred: 0,
     skipped: 0,
     failed: 0,
     processed: 0,
@@ -159,7 +166,7 @@ async function saveData(data: StorageData): Promise<void> {
 
 async function syncRequirements(data: StorageData, report: SyncReport): Promise<void> {
   for (const requirement of data.requirements || []) {
-    if (!shouldUpload(requirement)) continue;
+    if (!shouldUpload(requirement, report)) continue;
     if (isLimitReached(report)) break;
     await uploadItem(
       requirement,
@@ -183,8 +190,16 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
   const requirementsById = new Map((data.requirements || []).map((item) => [item.requirementId, item]));
 
   for (const round of data.rounds || []) {
-    if (!shouldUpload(round)) continue;
+    if (!shouldUpload(round, report)) continue;
     if (isLimitReached(report)) break;
+    if (isTestRound(round)) {
+      markSkipped(round, "Skipped test or verification round.");
+      report.skipped += 1;
+      report.testDataSkipped += 1;
+      report.processed += 1;
+      await saveCheckpoint(data);
+      continue;
+    }
 
     const requirement = round.requirementId === null ? undefined : requirementsById.get(round.requirementId);
     await uploadItem(
@@ -233,8 +248,16 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
 
 async function syncRoundReverts(data: StorageData, idMap: Map<number, number>, report: SyncReport): Promise<void> {
   for (const revert of data.roundReverts || []) {
-    if (!shouldUpload(revert)) continue;
+    if (!shouldUpload(revert, report)) continue;
     if (isLimitReached(report)) break;
+    if (isTestRevert(revert, data.rounds || [])) {
+      markSkipped(revert, "Skipped revert for test or verification round.");
+      report.skipped += 1;
+      report.testDataSkipped += 1;
+      report.processed += 1;
+      await saveCheckpoint(data);
+      continue;
+    }
 
     const onlineTargetRoundId = idMap.get(revert.targetRoundId);
     if (!onlineTargetRoundId) {
@@ -270,12 +293,22 @@ async function syncRoundReverts(data: StorageData, idMap: Map<number, number>, r
 
 async function syncTokenUsageEvents(data: StorageData, idMap: Map<number, number>, report: SyncReport): Promise<void> {
   for (const event of data.tokenUsageEvents || []) {
-    if (!shouldUpload(event)) continue;
+    if (!shouldUpload(event, report)) continue;
     if (isLimitReached(report)) break;
 
     if (event.roundId === null) {
       markSkipped(event, "Token usage event has no roundId.");
       report.skipped += 1;
+      report.processed += 1;
+      await saveCheckpoint(data);
+      continue;
+    }
+
+    const localRound = (data.rounds || []).find((round) => round.id === event.roundId);
+    if (localRound && isTestRound(localRound)) {
+      markSkipped(event, "Skipped token usage event for test or verification round.");
+      report.skipped += 1;
+      report.testDataSkipped += 1;
       report.processed += 1;
       await saveCheckpoint(data);
       continue;
@@ -375,8 +408,47 @@ function buildRoundIdMap(rounds: Round[]): Map<number, number> {
   return idMap;
 }
 
-function shouldUpload(item: { _sync?: SyncState }): boolean {
-  return item._sync?.status !== "synced" && item._sync?.status !== "skipped";
+function shouldUpload(item: { _sync?: SyncState }, report?: SyncReport): boolean {
+  if (item._sync?.status === "synced" || item._sync?.status === "skipped") return false;
+  if (args.retryFailedNow) return true;
+  if (item._sync?.status !== "failed") return true;
+  if (!item._sync.nextRetryAt) return true;
+  const ready = new Date(item._sync.nextRetryAt).getTime() <= Date.now();
+  if (!ready && report) {
+    report.retryDeferred += 1;
+  }
+  return ready;
+}
+
+function isTestRevert(revert: RoundRevert, rounds: Round[]): boolean {
+  const target = rounds.find((round) => round.id === revert.targetRoundId);
+  return isTestLikeText(revert.promptText) || Boolean(target && isTestRound(target));
+}
+
+function isTestRound(round: Round): boolean {
+  const metadata = round.metadata || {};
+  return (
+    isTestLikeText(round.promptText) ||
+    isTestLikeText(round.conversationId) ||
+    isTestLikeText(round.modelName) ||
+    isTestLikeText(String(metadata.client ?? "")) ||
+    isTestLikeText(String(metadata.source ?? "")) ||
+    metadata.skipOnlineSync === true ||
+    metadata.testData === true
+  );
+}
+
+function isTestLikeText(value: string | null | undefined): boolean {
+  const text = String(value ?? "").toLowerCase();
+  return (
+    text.includes("#999") ||
+    text.includes("token sync verification") ||
+    text.includes("dashboard temporary round") ||
+    text.includes("dashboard-api-") ||
+    text.includes("dashboard-test") ||
+    text.includes("verify-dashboard") ||
+    text.includes("verify-model")
+  );
 }
 
 function isLimitReached(report: SyncReport): boolean {
@@ -396,7 +468,17 @@ function markSkipped(item: { _sync?: SyncState }, reason: string): void {
 }
 
 function markFailed(item: { _sync?: SyncState }, error: string): void {
-  item._sync = { status: "failed", error };
+  const now = new Date();
+  const failedAttempts = (item._sync?.failedAttempts ?? 0) + 1;
+  const delayMinutes = Math.min(60, 5 * 2 ** Math.max(failedAttempts - 1, 0));
+  item._sync = {
+    ...item._sync,
+    status: "failed",
+    error,
+    failedAttempts,
+    lastAttemptAt: now.toISOString(),
+    nextRetryAt: new Date(now.getTime() + delayMinutes * 60 * 1000).toISOString(),
+  };
 }
 
 async function saveCheckpoint(data: StorageData): Promise<void> {
@@ -427,14 +509,17 @@ function printReport(report: SyncReport): void {
   console.log(`rounds: ${report.rounds}`);
   console.log(`roundReverts: ${report.roundReverts}`);
   console.log(`tokenUsageEvents: ${report.tokenUsageEvents}`);
+  console.log(`testDataSkipped: ${report.testDataSkipped}`);
+  console.log(`retryDeferred: ${report.retryDeferred}`);
   console.log(`skipped: ${report.skipped}`);
   console.log(`failed: ${report.failed}`);
 }
 
-function parseArgs(argv: string[]): { dryRun: boolean; limit: number } {
+function parseArgs(argv: string[]): { dryRun: boolean; limit: number; retryFailedNow: boolean } {
   const parsed = {
     dryRun: false,
     limit: readNumberEnv("ONLINE_SYNC_LIMIT", 200),
+    retryFailedNow: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -442,6 +527,8 @@ function parseArgs(argv: string[]): { dryRun: boolean; limit: number } {
     const next = argv[index + 1];
     if (arg === "--dry-run") {
       parsed.dryRun = true;
+    } else if (arg === "--retry-failed-now") {
+      parsed.retryFailedNow = true;
     } else if (arg === "--limit" && next) {
       parsed.limit = Number(next);
       index += 1;

@@ -207,16 +207,22 @@ async function loadPageData() {
   const query = filterQuery();
 
   if (page === "overview") {
-    const [summary, requirements, models, syncStatus] = await Promise.all([
+    const [summary, requirements, models] = await Promise.all([
       api(`/api/summary${query}`),
       api(`/api/requirements${query}`),
-      api(`/api/models${query}`),
-      api("/api/sync-status")
+      api(`/api/models${query}`)
     ]);
     state.summary = summary;
     state.requirements = requirements;
     state.models = models;
-    state.syncStatus = syncStatus;
+    state.syncStatus = await api("/api/sync-status").catch((error) => ({
+      running: false,
+      stale: false,
+      state: {
+        status: "unavailable",
+        lastError: error instanceof Error ? error.message : "sync status unavailable"
+      }
+    }));
   } else if (page === "requirements") {
     state.requirements = await api(`/api/requirements${query}`);
   } else if (page === "models") {
