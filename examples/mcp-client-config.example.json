@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mcp-toolbox": {
+      "command": "node",
+      "args": [
+        "/Users/dubo/Documents/sbt/sl/mcp/dist/index.js"
+      ],
+      "env": {
+        "MCP_TOOLBOX_STORAGE_DIR": ".mcp-toolbox",
+        "FEISHU_APP_ID": "cli_xxx",
+        "FEISHU_APP_SECRET": "replace-with-your-secret",
+        "FEISHU_BASE_URL": "https://open.feishu.cn"
+      }
+    }
+  }
+}

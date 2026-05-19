@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>对话详情 - AI Coding 统计</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body data-page="rounds">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AI Coding Stats</p>
+        <h1>对话详情</h1>
+      </div>
+      <button id="logoutButton" class="secondary-button" type="button">退出</button>
+    </header>
+    <nav class="page-nav" aria-label="统计页面">
+      <a href="/" data-nav="overview">总览</a>
+      <a href="/requirements.html" data-nav="requirements">按需求</a>
+      <a href="/models.html" data-nav="models">按模型</a>
+      <a href="/timeline.html" data-nav="timeline">按日期</a>
+      <a href="/rounds.html" data-nav="rounds">对话详情</a>
+      <a href="/requirement-maintenance.html" data-nav="requirement-maintenance">需求维护</a>
+      <a href="/local-logs.html" data-nav="local-logs">本地日志</a>
+    </nav>
+    <main class="workspace">
+      <section id="filters" class="filters" aria-label="筛选条件"></section>
+      <section class="panel round-editor" aria-label="对话编辑">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Round Editor</p>
+            <h2>编辑对话记录</h2>
+          </div>
+          <button id="clearRoundEditorButton" class="secondary-button" type="button">清空</button>
+        </div>
+        <form id="roundForm" class="round-form">
+          <input id="roundIdInput" type="hidden">
+          <div class="form-grid">
+            <label>
+              需求编号
+              <input id="roundRequirementInput" type="number" min="1" step="1" placeholder="留空表示未关联">
+            </label>
+            <label>
+              模型
+              <input id="roundModelInput" type="text" required>
+            </label>
+            <label>
+              开始时间
+              <input id="roundStartedInput" type="datetime-local" step="1" required>
+            </label>
+            <label>
+              结束时间
+              <input id="roundEndedInput" type="datetime-local" step="1" required>
+            </label>
+            <label>
+              客户端
+              <input id="roundClientInput" type="text" maxlength="64">
+            </label>
+            <label>
+              文件数
+              <input id="roundFilesInput" type="number" min="0" step="1">
+            </label>
+            <label>
+              新增行
+              <input id="roundLinesAddedInput" type="number" min="0" step="1">
+            </label>
+            <label>
+              删除行
+              <input id="roundLinesDeletedInput" type="number" min="0" step="1">
+            </label>
+            <label>
+              代码改动
+              <input id="roundCodeLinesInput" type="number" min="0" step="1">
+            </label>
+            <label>
+              输入 Token
+              <input id="roundInputTokensInput" type="number" min="0" step="1">
+            </label>
+            <label>
+              输出 Token
+              <input id="roundOutputTokensInput" type="number" min="0" step="1">
+            </label>
+            <label>
+              总 Token
+              <input id="roundTotalTokensInput" type="number" min="0" step="1">
+            </label>
+            <label class="full-field">
+              Prompt
+              <textarea id="roundPromptInput" rows="5"></textarea>
+            </label>
+          </div>
+          <p id="roundFormMessage" class="form-message"></p>
+          <div class="form-actions">
+            <button id="saveRoundButton" type="submit">保存对话</button>
+            <button id="deleteRoundButton" class="danger-button" type="button">删除对话</button>
+          </div>
+        </form>
+      </section>
+      <article class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Rounds</p>
+            <h2>每轮 AI Coding 对话</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>需求</th>
+                <th>开始时间</th>
+                <th>结束时间</th>
+                <th>耗时</th>
+                <th>模型</th>
+                <th>客户端</th>
+                <th>代码改动</th>
+                <th>Token</th>
+                <th>状态</th>
+                <th>Prompt</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="roundsTable"></tbody>
+          </table>
+        </div>
+      </article>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

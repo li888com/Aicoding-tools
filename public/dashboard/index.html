@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Coding 统计</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body data-page="overview">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AI Coding Stats</p>
+        <h1>总览</h1>
+      </div>
+      <button id="logoutButton" class="secondary-button" type="button">退出</button>
+    </header>
+
+    <nav class="page-nav" aria-label="统计页面">
+      <a href="/" data-nav="overview">总览</a>
+      <a href="/requirements.html" data-nav="requirements">按需求</a>
+      <a href="/models.html" data-nav="models">按模型</a>
+      <a href="/timeline.html" data-nav="timeline">按日期</a>
+      <a href="/rounds.html" data-nav="rounds">对话详情</a>
+      <a href="/requirement-maintenance.html" data-nav="requirement-maintenance">需求维护</a>
+      <a href="/local-logs.html" data-nav="local-logs">本地日志</a>
+    </nav>
+
+    <main class="workspace">
+      <section id="filters" class="filters" aria-label="筛选条件"></section>
+      <section id="kpiGrid" class="kpi-grid" aria-label="关键指标"></section>
+      <section id="tokenQualityGrid" class="quality-grid" aria-label="Token 数据质量"></section>
+      <section class="chart-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Requirement Efficiency</p>
+              <h2>需求效率 Top 8</h2>
+            </div>
+          </div>
+          <div id="requirementChart" class="bar-chart"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Model Comparison</p>
+              <h2>模型效率对比</h2>
+            </div>
+          </div>
+          <div id="modelChart" class="bar-chart"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

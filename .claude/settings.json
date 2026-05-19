@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh search *)",
+      "Bash(ls /tmp/feishu-docx/ 2>/dev/null | head -20)",
+      "Read(//tmp/**)",
+      "Bash(ls /tmp/ 2>&1 | grep -i feishu)",
+      "Read(//private/tmp/**)"
+    ]
+  }
+}

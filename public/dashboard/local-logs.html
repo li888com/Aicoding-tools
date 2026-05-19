@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>本地日志 - AI Coding 统计</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body data-page="local-logs">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AI Coding Stats</p>
+        <h1>本地日志</h1>
+      </div>
+      <button id="logoutButton" class="secondary-button" type="button">退出</button>
+    </header>
+    <nav class="page-nav" aria-label="统计页面">
+      <a href="/" data-nav="overview">总览</a>
+      <a href="/requirements.html" data-nav="requirements">按需求</a>
+      <a href="/models.html" data-nav="models">按模型</a>
+      <a href="/timeline.html" data-nav="timeline">按日期</a>
+      <a href="/rounds.html" data-nav="rounds">对话详情</a>
+      <a href="/requirement-maintenance.html" data-nav="requirement-maintenance">需求维护</a>
+      <a href="/local-logs.html" data-nav="local-logs">本地日志</a>
+    </nav>
+    <main class="workspace">
+      <section class="filters log-filters" aria-label="日志筛选">
+        <label>
+          日志来源
+          <select id="logClientInput">
+            <option value="codex">Codex</option>
+            <option value="claude-code">Claude Code</option>
+          </select>
+        </label>
+        <label>
+          路径搜索
+          <input id="logSearchInput" type="search" placeholder="按路径关键词过滤">
+        </label>
+        <label>
+          返回文件数
+          <input id="logLimitInput" type="number" min="1" max="200" value="50">
+        </label>
+        <label>
+          读取尾部
+          <select id="logTailBytesInput">
+            <option value="32768">32 KB</option>
+            <option value="65536" selected>64 KB</option>
+            <option value="131072">128 KB</option>
+            <option value="262144">256 KB</option>
+          </select>
+        </label>
+        <button id="loadLogsButton" type="button">加载</button>
+      </section>
+      <section class="log-layout">
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Files</p>
+              <h2>日志文件</h2>
+            </div>
+            <small id="logScanStatus" class="muted-block"></small>
+          </div>
+          <div class="table-wrap compact-table log-file-list">
+            <table>
+              <thead>
+                <tr>
+                  <th>文件</th>
+                  <th>类型</th>
+                  <th>大小</th>
+                  <th>修改时间</th>
+                </tr>
+              </thead>
+              <tbody id="localLogFilesTable"></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Preview</p>
+              <h2>尾部预览</h2>
+            </div>
+            <small id="localLogPreviewMeta" class="muted-block"></small>
+          </div>
+          <pre id="localLogPreview" class="log-preview">请选择一个日志文件</pre>
+        </article>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

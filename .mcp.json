@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mcp-toolbox": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "${projectRoot}"
+    }
+  }
+}

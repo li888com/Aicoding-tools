@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>需求维护 - AI Coding 统计</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body data-page="requirement-maintenance">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AI Coding Stats</p>
+        <h1>需求维护</h1>
+      </div>
+      <button id="logoutButton" class="secondary-button" type="button">退出</button>
+    </header>
+    <nav class="page-nav" aria-label="统计页面">
+      <a href="/" data-nav="overview">总览</a>
+      <a href="/requirements.html" data-nav="requirements">按需求</a>
+      <a href="/models.html" data-nav="models">按模型</a>
+      <a href="/timeline.html" data-nav="timeline">按日期</a>
+      <a href="/rounds.html" data-nav="rounds">对话详情</a>
+      <a href="/requirement-maintenance.html" data-nav="requirement-maintenance">需求维护</a>
+      <a href="/local-logs.html" data-nav="local-logs">本地日志</a>
+    </nav>
+    <main class="workspace">
+      <section class="panel requirement-manager" aria-label="需求维护">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Requirement Records</p>
+            <h2>维护需求信息</h2>
+          </div>
+          <button id="newRequirementButton" class="secondary-button" type="button">新增需求</button>
+        </div>
+        <div class="requirement-manager-body">
+          <div class="requirement-list">
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>需求</th>
+                    <th>项目</th>
+                    <th>GPM</th>
+                    <th>轮次</th>
+                    <th>代码改动</th>
+                  </tr>
+                </thead>
+                <tbody id="requirementRecordsTable"></tbody>
+              </table>
+            </div>
+          </div>
+          <form id="requirementForm" class="requirement-form">
+            <div class="form-grid">
+              <label>
+                需求编号
+                <input id="requirementIdInput" type="number" min="1" step="1" required>
+              </label>
+              <label>
+                状态
+                <select id="requirementStatusInput">
+                  <option value="active">进行中</option>
+                  <option value="done">已完成</option>
+                  <option value="archived">已归档</option>
+                </select>
+              </label>
+              <label>
+                需求标题
+                <input id="requirementTitleInput" type="text" maxlength="255">
+              </label>
+              <label>
+                项目名称
+                <input id="requirementProjectInput" type="text" maxlength="255">
+              </label>
+              <label>
+                GPM 编号
+                <input id="requirementGpmInput" type="text" maxlength="128">
+              </label>
+              <label class="full-field">
+                备注
+                <textarea id="requirementDescriptionInput" rows="4" maxlength="5000"></textarea>
+              </label>
+            </div>
+            <p id="requirementFormMessage" class="form-message"></p>
+            <div class="form-actions">
+              <button id="saveRequirementButton" type="submit">保存需求</button>
+              <button id="deleteRequirementButton" class="danger-button" type="button">删除需求</button>
+              <button id="resetRequirementButton" class="secondary-button" type="button">清空</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "name": "mcp-toolbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP toolbox for AI Coding statistics and Feishu cloud document access.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "dashboard:dev": "tsx src/dashboard-server.ts",
+    "dashboard:start": "node dist/dashboard-server.js",
+    "start": "node dist/index.js",
+    "sync:online": "tsx scripts/sync-to-online.ts",
+    "sync:online:dry": "tsx scripts/sync-to-online.ts --dry-run",
+    "tokens:sync": "tsx scripts/sync-token-usage.ts",
+    "tokens:sync:codex": "tsx scripts/sync-token-usage.ts --client codex",
+    "tokens:sync:claude": "tsx scripts/sync-token-usage.ts --client claude-code",
+    "test:record": "tsx scripts/record-sample.ts",
+    "test:verify": "tsx scripts/verify-behavior.ts",
+    "test:revert": "tsx scripts/verify-revert.ts",
+    "test:dashboard": "tsx scripts/verify-dashboard-api.ts",
+    "test:tokens": "tsx scripts/verify-token-sync.ts",
+    "test:feishu": "tsx scripts/verify-feishu-doc.ts",
+    "test:mcp": "tsx scripts/verify-mcp-server.ts",
+    "test:decrypt": "tsx scripts/verify-file-decrypt.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "dotenv": "^16.4.7",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/form-data": "^2.2.1",
+    "@types/node": "^22.10.2",
+    "form-data": "^4.0.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
