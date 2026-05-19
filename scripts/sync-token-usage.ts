@@ -44,7 +44,7 @@ type RoundCandidate = {
   endedAt?: Date;
   rawEvent: Record<string, unknown>;
   note?: string;
-  matchQuality?: "exact_tool_call" | "prompt_tool_call" | "time_window";
+  matchQuality?: "exact_tool_call" | "turn_id" | "prompt_tool_call" | "time_window";
   matchCallId?: string;
 };
 
@@ -461,7 +461,8 @@ async function findCodexCandidates(round: RoundRow, args: Args): Promise<RoundCa
       },
       note: increment > 0
         ? "Codex token usage derived from cumulative total delta"
-        : "Codex cumulative total only; no previous total found"
+        : "Codex cumulative total only; no previous total found",
+      matchQuality: expectedTurnId ? "turn_id" : "time_window"
     };
   });
 }
@@ -536,11 +537,12 @@ async function findCodexRolloutCandidates(round: RoundRow, projectPath?: string)
           && !hasRecordMatch
           && turnsOverlap(activeTurn.startedAt, activeTurn.completedAt, startedAt, endedAt, 90_000);
         if (turnMatches && (hasRecordMatch || expectedTurnId || timeWindowMatch) && (!projectPath || isSameOrChildPath(activeTurn.cwd, projectPath))) {
+          const matchQuality = hasRecordMatch ? "exact_tool_call" : expectedTurnId ? "turn_id" : "time_window";
           const candidate = codexRolloutTurnToCandidate(
             file,
             activeTurn,
             round,
-            hasRecordMatch || expectedTurnId ? "exact_tool_call" : "time_window"
+            matchQuality
           );
           if (candidate) candidates.push(candidate);
         }
@@ -632,7 +634,7 @@ function codexRolloutTurnToCandidate(
   file: string,
   turn: CodexRolloutTurn,
   round: RoundRow,
-  matchQuality: "exact_tool_call" | "time_window" = "exact_tool_call"
+  matchQuality: "exact_tool_call" | "turn_id" | "time_window" = "exact_tool_call"
 ): RoundCandidate | null {
   const finalEvent = turn.tokenEvents.at(-1);
   if (!finalEvent) return null;
@@ -672,12 +674,20 @@ function codexRolloutTurnToCandidate(
       reasoningOutputTokens,
       finalTokenEventLine: finalEvent.lineNumber
     },
-    note: matchQuality === "exact_tool_call"
-      ? "Codex usage matched by rollout MCP record tool call; token_count cumulative delta"
-      : "Codex usage matched by rollout time window; token_count cumulative delta",
+    note: codexRolloutNote(matchQuality),
     matchQuality,
     matchCallId: turn.recordCall?.callId
   };
+}
+
+function codexRolloutNote(matchQuality: "exact_tool_call" | "turn_id" | "time_window"): string {
+  if (matchQuality === "exact_tool_call") {
+    return "Codex usage matched by rollout MCP record tool call; token_count cumulative delta";
+  }
+  if (matchQuality === "turn_id") {
+    return "Codex usage matched by rollout turnId; token_count cumulative delta";
+  }
+  return "Codex usage matched by rollout time window; token_count cumulative delta";
 }
 
 function extractCodexThreadIdFromRolloutPath(filePath: string): string | undefined {
@@ -789,6 +799,7 @@ async function applyCandidate(
     totalTokens: candidate.totalTokens,
     modelName: candidate.modelName ?? existing.modelName,
     tokenSource,
+    tokenMatchQuality: candidate.matchQuality ?? null,
     tokenSyncStatus: "synced",
     tokenSyncedAt: now,
     tokenSyncNote: candidate.note ?? null,
@@ -808,6 +819,7 @@ async function applyCandidate(
     inputTokens: candidate.inputTokens,
     outputTokens: candidate.outputTokens,
     totalTokens: candidate.totalTokens,
+    matchQuality: candidate.matchQuality ?? null,
     rawEvent: candidate.rawEvent ?? null,
   });
 }
@@ -827,6 +839,7 @@ async function markRound(
 
   const updated: localStorage.Round = {
     ...existing,
+    tokenMatchQuality: null,
     tokenSyncStatus: status,
     tokenSyncNote: note.slice(0, 512),
     tokenSyncedAt: new Date().toISOString(),

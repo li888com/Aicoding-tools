@@ -101,6 +101,26 @@ try {
     results[endpoint] = await response.json();
   }
 
+  const summary = results["/api/summary"] as Record<string, unknown>;
+  for (const key of [
+    "tokenPendingRounds",
+    "tokenNotFoundRounds",
+    "tokenAmbiguousRounds",
+    "tokenFailedRounds",
+    "tokenCompletenessRate",
+    "lastTokenSyncedAt",
+    "lastOnlineSyncedAt"
+  ]) {
+    if (!(key in summary)) {
+      throw new Error(`/api/summary is missing ${key}`);
+    }
+  }
+
+  const filters = results["/api/filters"] as Record<string, unknown>;
+  if (!Array.isArray(filters.tokenSyncStatuses)) {
+    throw new Error("/api/filters is missing tokenSyncStatuses");
+  }
+
   const saved = await fetch(`${baseUrl}/api/requirement-records/${testRequirementId}`, {
     method: "PUT",
     headers: {

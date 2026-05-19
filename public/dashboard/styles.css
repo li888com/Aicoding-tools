@@ -473,6 +473,11 @@ td {
   color: var(--danger);
 }
 
+.status-pill.pending {
+  background: #fff4d8;
+  color: #8a5a00;
+}
+
 .prompt-cell {
   max-width: 420px;
   color: var(--muted);

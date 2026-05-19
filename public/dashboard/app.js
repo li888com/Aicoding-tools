@@ -84,6 +84,12 @@ function renderFilters() {
         <option value="">全部客户端</option>
       </select>
     </label>
+    <label>
+      Token status
+      <select id="tokenStatusFilter">
+        <option value="">All token status</option>
+      </select>
+    </label>
     <label class="checkbox-label">
       <input id="includeRevertedFilter" type="checkbox">
       包含撤销轮次
@@ -100,13 +106,14 @@ function renderFilters() {
     (value) => value.id === null ? "null" : String(value.id)
   );
   fillSelect($("#clientFilter"), state.filters?.clients ?? [], "全部客户端", (value) => value);
+  fillSelect($("#tokenStatusFilter"), state.filters?.tokenSyncStatuses ?? [], "All token status", (value) => value);
   applyUrlFilters();
 
   $("#refreshButton").addEventListener("click", () => {
     void loadPageData();
   });
 
-  for (const selector of ["#fromFilter", "#toFilter", "#modelFilter", "#requirementFilter", "#clientFilter", "#includeRevertedFilter"]) {
+  for (const selector of ["#fromFilter", "#toFilter", "#modelFilter", "#requirementFilter", "#clientFilter", "#tokenStatusFilter", "#includeRevertedFilter"]) {
     $(selector).addEventListener("change", () => {
       updateUrlFromFilters();
       void loadPageData();
@@ -142,6 +149,7 @@ function applyUrlFilters() {
   setValue("#modelFilter", params.get("model") ?? "");
   setValue("#requirementFilter", params.get("requirementId") ?? "");
   setValue("#clientFilter", params.get("client") ?? "");
+  setValue("#tokenStatusFilter", params.get("tokenSyncStatus") ?? "");
   const includeReverted = $("#includeRevertedFilter");
   if (includeReverted) includeReverted.checked = params.get("includeReverted") === "true";
 }
@@ -163,12 +171,14 @@ function collectFilterParams() {
   const model = $("#modelFilter")?.value;
   const requirementId = $("#requirementFilter")?.value;
   const client = $("#clientFilter")?.value;
+  const tokenSyncStatus = $("#tokenStatusFilter")?.value;
 
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (model) params.set("model", model);
   if (requirementId) params.set("requirementId", requirementId);
   if (client) params.set("client", client);
+  if (tokenSyncStatus) params.set("tokenSyncStatus", tokenSyncStatus);
   if ($("#includeRevertedFilter")?.checked) params.set("includeReverted", "true");
 
   return params;
@@ -227,13 +237,13 @@ async function loadLocalLogFiles() {
 
 function renderPage() {
   if ($("#kpiGrid")) renderKpis();
-  if ($("#tokenQualityGrid")) renderTokenQuality();
+  if ($("#tokenQualityGrid")) renderTokenQualityDashboard();
   if ($("#requirementChart")) renderRequirementChart();
   if ($("#modelChart")) renderModelChart();
   if ($("#timelineChart")) renderTimeline();
-  if ($("#requirementsTable")) renderRequirementTable();
+  if ($("#requirementsTable")) renderRequirementTableDashboard();
   if ($("#modelsTable")) renderModelTable();
-  if ($("#roundsTable")) renderRoundsTable();
+  if ($("#roundsTable")) renderRoundsTableDashboard();
   if ($("#requirementRecordsTable")) renderRequirementRecords();
   if ($("#localLogFilesTable")) renderLocalLogFiles();
 }
@@ -246,6 +256,29 @@ function renderTokenQuality() {
     ["Claude JSONL", formatNumber.format(summary.claudeTokenRounds ?? 0), "精确 input/output usage"],
     ["Codex 日志", formatNumber.format(summary.codexTokenRounds ?? 0), "基于累计 token 差值"],
     ["同步异常", formatNumber.format(summary.tokenSyncIssueRounds ?? 0), "未找到、多候选或失败"]
+  ];
+
+  $("#tokenQualityGrid").innerHTML = cards.map(([label, value, detail]) => `
+    <article class="quality-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </article>
+  `).join("");
+}
+
+function renderTokenQualityDashboard() {
+  const summary = state.summary;
+  if (!summary) return;
+  const cards = [
+    ["Token completeness", formatPercent(summary.tokenCompletenessRate), `${formatNumber.format(summary.tokenSyncedRounds ?? 0)} synced rounds`],
+    ["Pending", formatNumber.format(summary.tokenPendingRounds ?? 0), "Waiting for token sync"],
+    ["Not found", formatNumber.format(summary.tokenNotFoundRounds ?? 0), "No matching log event yet"],
+    ["Ambiguous", formatNumber.format(summary.tokenAmbiguousRounds ?? 0), "Needs manual binding"],
+    ["Failed", formatNumber.format(summary.tokenFailedRounds ?? 0), "Sync script error"],
+    ["Last token sync", formatDate(summary.lastTokenSyncedAt), "Most recent token update"],
+    ["Last online sync", formatDate(summary.lastOnlineSyncedAt), "Most recent upload"],
+    ["Log sources", `${formatNumber.format(summary.codexTokenRounds ?? 0)} / ${formatNumber.format(summary.claudeTokenRounds ?? 0)}`, "Codex / Claude"]
   ];
 
   $("#tokenQualityGrid").innerHTML = cards.map(([label, value, detail]) => `
@@ -393,6 +426,28 @@ function renderRequirementTable() {
   `).join("") || emptyRow(9);
 }
 
+function renderRequirementTableDashboard() {
+  $("#requirementsTable").innerHTML = state.requirements.map((row) => `
+    <tr>
+      <td>
+        <strong>${escapeHtml(row.requirementLabel)}</strong>
+        <small class="muted-block">${escapeHtml([row.projectName, row.gpmNumber].filter(Boolean).join(" / ") || "-")}</small>
+      </td>
+      <td>${escapeHtml([row.projectName, row.gpmNumber].filter(Boolean).join(" / ") || "-")}</td>
+      <td class="number-cell">${formatNumber.format(row.roundCount)}</td>
+      <td class="number-cell">${formatDuration(row.durationMs)}</td>
+      <td>${timeDrilldown(row.firstStartedAt, row.requirementId)}</td>
+      <td>${timeDrilldown(row.lastEndedAt, row.requirementId)}</td>
+      <td class="number-cell">${formatNumber.format(row.codeLinesChanged)}</td>
+      <td class="number-cell">${formatNumber.format(row.totalTokens)}</td>
+      <td class="number-cell">${formatPercent(row.tokenCompletenessRate)}</td>
+      <td class="number-cell">${formatNumber.format(row.tokenPendingRounds ?? 0)}</td>
+      <td class="number-cell">${formatNumber.format(row.tokenIssueRounds ?? 0)}</td>
+      <td class="number-cell">${formatMetric(row.codeLinesPerKTokens)}</td>
+    </tr>
+  `).join("") || emptyRow(12);
+}
+
 function renderModelTable() {
   $("#modelsTable").innerHTML = state.models.map((row) => `
     <tr>
@@ -430,6 +485,44 @@ function renderRoundsTable() {
       </td>
     </tr>
   `).join("") || emptyRow(12);
+}
+
+function renderRoundsTableDashboard() {
+  $("#roundsTable").innerHTML = state.rounds.map((row) => `
+    <tr>
+      <td class="number-cell">${row.id}</td>
+      <td>
+        ${escapeHtml(row.requirementLabel)}
+        <small class="muted-block">${escapeHtml([row.projectName, row.gpmNumber].filter(Boolean).join(" / ") || "-")}</small>
+      </td>
+      <td class="number-cell">${formatDate(row.startedAt)}</td>
+      <td class="number-cell">${formatDate(row.endedAt)}</td>
+      <td class="number-cell">${formatDuration(row.durationMs)}</td>
+      <td>${escapeHtml(row.modelName)}</td>
+      <td>${escapeHtml(row.client || "-")}</td>
+      <td class="number-cell">${formatNumber.format(row.codeLinesChanged)}</td>
+      <td class="number-cell">${formatNumber.format(row.totalTokens)}</td>
+      <td>${renderTokenStatus(row)}</td>
+      <td>${escapeHtml(row.tokenMatchQuality || "-")}</td>
+      <td><span class="status-pill ${row.isReverted ? "reverted" : ""}">${row.isReverted ? "宸叉挙閿€" : "鏈夋晥"}</span></td>
+      <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(row.promptText || "-")}</td>
+      <td>
+        <button class="link-button" type="button" data-edit-round="${row.id}">缂栬緫</button>
+        <button class="link-button danger-link" type="button" data-delete-round="${row.id}">鍒犻櫎</button>
+      </td>
+    </tr>
+  `).join("") || emptyRow(14);
+}
+
+function renderTokenStatus(row) {
+  const status = row.tokenSyncStatus || "-";
+  const issue = status === "not_found" || status === "ambiguous" || status === "failed";
+  const pending = status === "pending";
+  const className = issue ? "reverted" : pending ? "pending" : "";
+  const title = [row.tokenSyncNote, row.tokenSyncedAt ? `synced at ${formatDate(row.tokenSyncedAt)}` : ""]
+    .filter(Boolean)
+    .join(" / ");
+  return `<span class="status-pill ${className}" title="${escapeHtml(title)}">${escapeHtml(status)}</span>`;
 }
 
 function timeDrilldown(value, requirementId) {

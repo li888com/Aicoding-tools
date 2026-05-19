@@ -67,12 +67,15 @@ export async function closePool(): Promise<void> {
 export async function recordRound(input: RecordRoundInput): Promise<RecordedRound> {
   validateInput(input);
 
+  const conversationId = normalizeConversationId(input.conversationId);
+  const metadata = normalizeMetadata(input.metadata, conversationId);
+
   // Get or create conversation
-  let conversation = await localStorage.getConversation(input.conversationId);
+  let conversation = await localStorage.getConversation(conversationId);
   const now = new Date().toISOString();
   if (!conversation) {
     conversation = {
-      conversationId: input.conversationId,
+      conversationId,
       currentRequirementId: null,
       lastRoundId: null,
       firstSeenAt: now,
@@ -87,12 +90,13 @@ export async function recordRound(input: RecordRoundInput): Promise<RecordedRoun
     input.codeLinesChanged ?? (input.linesAdded ?? 0) + (input.linesDeleted ?? 0);
   const totalTokens = input.totalTokens ?? (input.inputTokens ?? 0) + (input.outputTokens ?? 0);
   const tokenSource = totalTokens > 0 ? "mcp_payload" : "unavailable";
+  const tokenMatchQuality: localStorage.TokenMatchQuality | null = totalTokens > 0 ? "mcp_payload" : null;
   const tokenSyncStatus = totalTokens > 0 ? "synced" : "pending";
   const tokenSyncNote = totalTokens > 0 ? null : "Token usage unavailable in MCP payload";
 
   // Create round
   const round = await localStorage.createRound({
-    conversationId: input.conversationId,
+    conversationId,
     requirementId: resolution.requirementId,
     requirementSource: resolution.source,
     modelName: input.modelName,
@@ -107,10 +111,11 @@ export async function recordRound(input: RecordRoundInput): Promise<RecordedRoun
     outputTokens: input.outputTokens ?? 0,
     totalTokens,
     tokenSource,
+    tokenMatchQuality,
     tokenSyncedAt: null,
     tokenSyncStatus,
     tokenSyncNote,
-    metadata: input.metadata ?? null,
+    metadata,
   });
 
   // Update conversation
@@ -138,12 +143,15 @@ export async function recordRound(input: RecordRoundInput): Promise<RecordedRoun
 export async function recordRoundRevert(input: RecordRoundRevertInput): Promise<RecordedRoundRevert> {
   validateRevertInput(input);
 
+  const conversationId = normalizeConversationId(input.conversationId);
+  const metadata = normalizeMetadata(input.metadata, conversationId);
+
   // Get or create conversation
-  let conversation = await localStorage.getConversation(input.conversationId);
+  let conversation = await localStorage.getConversation(conversationId);
   const now = new Date().toISOString();
   if (!conversation) {
     conversation = {
-      conversationId: input.conversationId,
+      conversationId,
       currentRequirementId: null,
       lastRoundId: null,
       firstSeenAt: now,
@@ -157,7 +165,7 @@ export async function recordRoundRevert(input: RecordRoundRevertInput): Promise<
   // Resolve target round id
   let targetRoundId = input.targetRoundId;
   if (targetRoundId === undefined) {
-    const rounds = await localStorage.getRoundsByConversation(input.conversationId);
+    const rounds = await localStorage.getRoundsByConversation(conversationId);
     const reverts = await localStorage.getRoundReverts();
     const revertedRoundIds = new Set(reverts.map((revert) => revert.targetRoundId));
     const activeRounds = rounds
@@ -178,7 +186,7 @@ export async function recordRoundRevert(input: RecordRoundRevertInput): Promise<
 
   // Validate target round exists and is not already reverted
   const targetRound = await localStorage.getRound(targetRoundId);
-  if (!targetRound || targetRound.conversationId !== input.conversationId) {
+  if (!targetRound || targetRound.conversationId !== conversationId) {
     throw new Error(`Round ${targetRoundId} not found or does not belong to this conversation`);
   }
   const existingRevert = await localStorage.getRoundRevertByTarget(targetRoundId);
@@ -193,7 +201,7 @@ export async function recordRoundRevert(input: RecordRoundRevertInput): Promise<
   // Create revert
   const revert = await localStorage.createRoundRevert({
     targetRoundId,
-    conversationId: input.conversationId,
+    conversationId,
     modelName: input.modelName,
     promptText: input.promptText ?? null,
     revertedAt: input.revertedAt,
@@ -205,7 +213,7 @@ export async function recordRoundRevert(input: RecordRoundRevertInput): Promise<
     inputTokens: input.inputTokens ?? 0,
     outputTokens: input.outputTokens ?? 0,
     totalTokens,
-    metadata: input.metadata ?? null,
+    metadata,
   });
 
   return {
@@ -218,6 +226,45 @@ export async function recordRoundRevert(input: RecordRoundRevertInput): Promise<
     codeLinesChanged: revert.codeLinesChanged,
     totalTokens: revert.totalTokens,
   };
+}
+
+function normalizeConversationId(conversationId: string): string {
+  return conversationId.trim().replaceAll("\\", "/");
+}
+
+function normalizeMetadata(
+  metadata: Record<string, unknown> | undefined,
+  conversationId: string
+): Record<string, unknown> | null {
+  const normalized: Record<string, unknown> = metadata ? { ...metadata } : {};
+
+  if (typeof normalized.client === "string") {
+    normalized.client = normalized.client.trim();
+  }
+
+  const projectPath =
+    typeof normalized.projectPath === "string" && normalized.projectPath.trim()
+      ? normalized.projectPath
+      : projectFromConversationId(conversationId);
+
+  if (projectPath) {
+    normalized.projectPath = normalizePathForMetadata(projectPath);
+  }
+
+  if (Object.keys(normalized).length === 0) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function projectFromConversationId(conversationId: string): string | undefined {
+  const match = conversationId.match(/^(?:codex|claude):(.+?)(?::[^/].*)?$/);
+  return match?.[1];
+}
+
+function normalizePathForMetadata(value: string): string {
+  return value.trim().replaceAll("\\", "/");
 }
 
 function validateInput(input: RecordRoundInput): void {

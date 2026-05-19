@@ -14,6 +14,7 @@ type FilterOptions = {
   model?: string;
   requirementId?: string;
   client?: string;
+  tokenSyncStatus?: string;
   includeReverted: boolean;
 };
 
@@ -220,6 +221,7 @@ function parseFilters(searchParams: URLSearchParams): FilterOptions {
     model: searchParams.get("model") || undefined,
     requirementId: searchParams.get("requirementId") || undefined,
     client: searchParams.get("client") || undefined,
+    tokenSyncStatus: searchParams.get("tokenSyncStatus") || undefined,
     includeReverted: searchParams.get("includeReverted") === "true",
   };
 }
@@ -286,6 +288,9 @@ function filterRoundsBase(rounds: localStorage.Round[], filters: FilterOptions):
     if (filters.client && getRoundClient(round) !== filters.client) {
       return false;
     }
+    if (filters.tokenSyncStatus && round.tokenSyncStatus !== filters.tokenSyncStatus) {
+      return false;
+    }
     if (filters.requirementId) {
       if (requirementFilter === null) {
         if (round.requirementId !== null) return false;
@@ -313,9 +318,15 @@ async function getSummary(filters: FilterOptions) {
   let unlinkedRounds = 0;
   let tokenMissingRounds = 0;
   let tokenSyncedRounds = 0;
+  let tokenPendingRounds = 0;
+  let tokenNotFoundRounds = 0;
+  let tokenAmbiguousRounds = 0;
+  let tokenFailedRounds = 0;
   let claudeTokenRounds = 0;
   let codexTokenRounds = 0;
   let tokenSyncIssueRounds = 0;
+  let lastTokenSyncedAt: string | null = null;
+  let lastOnlineSyncedAt: string | null = null;
 
   const requirementIds = new Set<number>();
   for (const round of effective) {
@@ -333,6 +344,18 @@ async function getSummary(filters: FilterOptions) {
     if (round.tokenSyncStatus === "synced") {
       tokenSyncedRounds++;
     }
+    if (round.tokenSyncStatus === "pending") {
+      tokenPendingRounds++;
+    }
+    if (round.tokenSyncStatus === "not_found") {
+      tokenNotFoundRounds++;
+    }
+    if (round.tokenSyncStatus === "ambiguous") {
+      tokenAmbiguousRounds++;
+    }
+    if (round.tokenSyncStatus === "failed") {
+      tokenFailedRounds++;
+    }
     if (round.tokenSource === "claude_jsonl") {
       claudeTokenRounds++;
     }
@@ -346,11 +369,19 @@ async function getSummary(filters: FilterOptions) {
     ) {
       tokenSyncIssueRounds++;
     }
+    if (round.tokenSyncedAt && (!lastTokenSyncedAt || new Date(round.tokenSyncedAt) > new Date(lastTokenSyncedAt))) {
+      lastTokenSyncedAt = round.tokenSyncedAt;
+    }
+    const onlineSyncedAt = round._sync?.status === "synced" ? round._sync.syncedAt : undefined;
+    if (onlineSyncedAt && (!lastOnlineSyncedAt || new Date(onlineSyncedAt) > new Date(lastOnlineSyncedAt))) {
+      lastOnlineSyncedAt = onlineSyncedAt;
+    }
   }
 
   const revertedRounds = base.reduce((count, round) => count + (revertedRoundIds.has(round.id) ? 1 : 0), 0);
   const codeLinesPerKTokens = totalTokens > 0 ? (codeLinesChanged / totalTokens) * 1000 : null;
   const tokensPerCodeLine = codeLinesChanged > 0 ? totalTokens / codeLinesChanged : null;
+  const tokenCompletenessRate = effective.length > 0 ? tokenSyncedRounds / effective.length : null;
 
   return {
     requirementCount: requirementIds.size,
@@ -359,6 +390,10 @@ async function getSummary(filters: FilterOptions) {
     unlinkedRounds,
     totalTokens,
     tokenMissingRounds,
+    tokenPendingRounds,
+    tokenNotFoundRounds,
+    tokenAmbiguousRounds,
+    tokenFailedRounds,
     codeLinesChanged,
     codeLinesPerKTokens,
     tokensPerCodeLine,
@@ -366,6 +401,9 @@ async function getSummary(filters: FilterOptions) {
     claudeTokenRounds,
     codexTokenRounds,
     tokenSyncIssueRounds,
+    tokenCompletenessRate,
+    lastTokenSyncedAt,
+    lastOnlineSyncedAt,
   };
 }
 
@@ -392,6 +430,11 @@ async function getRequirements(filters: FilterOptions) {
       lastEndedAt: string | null;
       codeLinesChanged: number;
       totalTokens: number;
+      tokenSyncedRounds: number;
+      tokenPendingRounds: number;
+      tokenIssueRounds: number;
+      tokenCompletenessRate: number | null;
+      lastTokenSyncedAt: string | null;
       codeLinesPerKTokens: number | null;
     }
   >();
@@ -413,6 +456,11 @@ async function getRequirements(filters: FilterOptions) {
         lastEndedAt: null,
         codeLinesChanged: 0,
         totalTokens: 0,
+        tokenSyncedRounds: 0,
+        tokenPendingRounds: 0,
+        tokenIssueRounds: 0,
+        tokenCompletenessRate: null,
+        lastTokenSyncedAt: null,
         codeLinesPerKTokens: null,
       };
       groups.set(reqId, group);
@@ -422,6 +470,18 @@ async function getRequirements(filters: FilterOptions) {
     group.durationMs += safeDurationMs(round);
     group.codeLinesChanged += round.codeLinesChanged;
     group.totalTokens += round.totalTokens;
+    if (round.tokenSyncStatus === "synced") {
+      group.tokenSyncedRounds++;
+    }
+    if (round.tokenSyncStatus === "pending") {
+      group.tokenPendingRounds++;
+    }
+    if (round.tokenSyncStatus === "not_found" || round.tokenSyncStatus === "ambiguous" || round.tokenSyncStatus === "failed") {
+      group.tokenIssueRounds++;
+    }
+    if (round.tokenSyncedAt && (!group.lastTokenSyncedAt || new Date(round.tokenSyncedAt) > new Date(group.lastTokenSyncedAt))) {
+      group.lastTokenSyncedAt = round.tokenSyncedAt;
+    }
 
     if (!group.firstStartedAt || new Date(round.startedAt) < new Date(group.firstStartedAt)) {
       group.firstStartedAt = round.startedAt;
@@ -433,6 +493,7 @@ async function getRequirements(filters: FilterOptions) {
 
   for (const group of groups.values()) {
     group.codeLinesPerKTokens = group.totalTokens > 0 ? (group.codeLinesChanged / group.totalTokens) * 1000 : null;
+    group.tokenCompletenessRate = group.roundCount > 0 ? group.tokenSyncedRounds / group.roundCount : null;
   }
 
   return Array.from(groups.values())
@@ -555,6 +616,7 @@ async function getRounds(filters: FilterOptions, limit: number) {
       outputTokens: round.outputTokens,
       totalTokens: round.totalTokens,
       tokenSource: round.tokenSource,
+      tokenMatchQuality: round.tokenMatchQuality ?? null,
       tokenSyncStatus: round.tokenSyncStatus,
       tokenSyncedAt: round.tokenSyncedAt,
       tokenSyncNote: round.tokenSyncNote,
@@ -569,6 +631,7 @@ async function getFilters() {
   const models = new Set<string>();
   const requirementIds = new Set<number>();
   const clients = new Set<string>();
+  const tokenSyncStatuses = new Set<string>();
   const recordMap = new Map(requirementRecords.map((record) => [record.requirementId, record]));
 
   for (const round of rounds) {
@@ -579,6 +642,9 @@ async function getFilters() {
     const client = getRoundClient(round);
     if (client) {
       clients.add(client);
+    }
+    if (round.tokenSyncStatus) {
+      tokenSyncStatuses.add(round.tokenSyncStatus);
     }
   }
 
@@ -595,6 +661,7 @@ async function getFilters() {
         .map((id) => ({ id, label: requirementLabel(id, recordMap.get(id)) })),
     ],
     clients: Array.from(clients).sort(),
+    tokenSyncStatuses: Array.from(tokenSyncStatuses).sort(),
   };
 }
 
@@ -769,6 +836,7 @@ async function updateRoundRecord(roundId: number, input: Record<string, unknown>
     tokenSyncedAt: totalTokens > 0 ? now : existing.tokenSyncedAt,
     tokenSyncNote: totalTokens > 0 ? null : existing.tokenSyncNote,
     tokenSource: totalTokens > 0 && existing.tokenSource === "unavailable" ? "manual" : existing.tokenSource,
+    tokenMatchQuality: totalTokens > 0 && existing.tokenSource === "unavailable" ? "manual" : existing.tokenMatchQuality ?? null,
   };
 
   await localStorage.updateRound(updated);

@@ -37,6 +37,7 @@ type Round = {
   outputTokens: number;
   totalTokens: number;
   tokenSource: string;
+  tokenMatchQuality?: string | null;
   tokenSyncedAt: string | null;
   tokenSyncStatus: string;
   tokenSyncNote: string | null;
@@ -77,6 +78,7 @@ type TokenUsageEvent = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  matchQuality?: string | null;
   rawEvent: Record<string, unknown> | null;
   _sync?: SyncState;
 };
@@ -199,6 +201,10 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
           outputTokens: round.outputTokens,
           totalTokens: round.totalTokens,
           tokenSource: round.tokenSource,
+          tokenMatchQuality: round.tokenMatchQuality ?? null,
+          tokenSyncedAt: round.tokenSyncedAt,
+          tokenSyncStatus: round.tokenSyncStatus,
+          tokenSyncNote: round.tokenSyncNote,
           metadata: { ...(round.metadata || {}), localRoundId: round.id },
         });
         return parseOnlineId(onlineRound?.id, "round response id");
@@ -286,6 +292,7 @@ async function syncTokenUsageEvents(data: StorageData, idMap: Map<number, number
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           totalTokens: event.totalTokens,
+          matchQuality: event.matchQuality ?? null,
           rawEvent: event.rawEvent,
         })
     );

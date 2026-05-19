@@ -37,6 +37,14 @@ type SyncState = {
   error?: string;
 };
 
+type TokenMatchQuality =
+  | "mcp_payload"
+  | "exact_tool_call"
+  | "turn_id"
+  | "prompt_tool_call"
+  | "time_window"
+  | "manual";
+
 type Round = {
   id: number;
   conversationId: string;
@@ -54,6 +62,7 @@ type Round = {
   outputTokens: number;
   totalTokens: number;
   tokenSource: string;
+  tokenMatchQuality: TokenMatchQuality | null;
   tokenSyncedAt: string | null;
   tokenSyncStatus: string;
   tokenSyncNote: string | null;
@@ -96,6 +105,7 @@ type TokenUsageEvent = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  matchQuality: TokenMatchQuality | null;
   rawEvent: Record<string, unknown> | null;
   createdAt: string;
   _sync?: SyncState;
@@ -220,7 +230,17 @@ async function saveData(data: StorageData): Promise<void> {
   lastModified = stats.mtimeMs;
 }
 
-export type { Conversation, Requirement, Round, RoundRevert, SyncState, SyncStatus, TokenUsageEvent, StorageData };
+export type {
+  Conversation,
+  Requirement,
+  Round,
+  RoundRevert,
+  SyncState,
+  SyncStatus,
+  TokenMatchQuality,
+  TokenUsageEvent,
+  StorageData
+};
 
 export async function getConversations(): Promise<Conversation[]> {
   const data = await loadData();
