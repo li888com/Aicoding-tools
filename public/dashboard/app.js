@@ -9,6 +9,7 @@ const state = {
   timeline: [],
   rounds: [],
   syncStatus: null,
+  corrections: [],
   editingRequirementId: null,
   editingRoundId: null,
   localLogFiles: [],
@@ -95,6 +96,10 @@ function renderFilters() {
       <input id="includeRevertedFilter" type="checkbox">
       包含撤销轮次
     </label>
+    <label class="checkbox-label">
+      <input id="includeIgnoredFilter" type="checkbox">
+      包含忽略轮次
+    </label>
     <button id="refreshButton" type="button">刷新</button>
   `;
 
@@ -114,7 +119,7 @@ function renderFilters() {
     void loadPageData();
   });
 
-  for (const selector of ["#fromFilter", "#toFilter", "#modelFilter", "#requirementFilter", "#clientFilter", "#tokenStatusFilter", "#includeRevertedFilter"]) {
+  for (const selector of ["#fromFilter", "#toFilter", "#modelFilter", "#requirementFilter", "#clientFilter", "#tokenStatusFilter", "#includeRevertedFilter", "#includeIgnoredFilter"]) {
     $(selector).addEventListener("change", () => {
       updateUrlFromFilters();
       void loadPageData();
@@ -153,6 +158,8 @@ function applyUrlFilters() {
   setValue("#tokenStatusFilter", params.get("tokenSyncStatus") ?? "");
   const includeReverted = $("#includeRevertedFilter");
   if (includeReverted) includeReverted.checked = params.get("includeReverted") === "true";
+  const includeIgnored = $("#includeIgnoredFilter");
+  if (includeIgnored) includeIgnored.checked = params.get("includeIgnored") === "true";
 }
 
 function setValue(selector, value) {
@@ -181,6 +188,7 @@ function collectFilterParams() {
   if (client) params.set("client", client);
   if (tokenSyncStatus) params.set("tokenSyncStatus", tokenSyncStatus);
   if ($("#includeRevertedFilter")?.checked) params.set("includeReverted", "true");
+  if ($("#includeIgnoredFilter")?.checked) params.set("includeIgnored", "true");
 
   return params;
 }
@@ -219,6 +227,8 @@ async function loadPageData() {
     state.rounds = await api(`/api/rounds${query}`);
   } else if (page === "requirement-maintenance") {
     state.requirementRecords = await api("/api/requirement-records");
+  } else if (page === "corrections") {
+    await loadCorrections();
   } else if (page === "local-logs") {
     await loadLocalLogFiles();
   }
@@ -249,7 +259,17 @@ function renderPage() {
   if ($("#modelsTable")) renderModelTable();
   if ($("#roundsTable")) renderRoundsTableDashboard();
   if ($("#requirementRecordsTable")) renderRequirementRecords();
+  if ($("#correctionsTable")) renderCorrections();
   if ($("#localLogFilesTable")) renderLocalLogFiles();
+}
+
+async function loadCorrections() {
+  const params = new URLSearchParams();
+  const roundId = $("#correctionRoundIdInput")?.value;
+  const limit = $("#correctionLimitInput")?.value || "100";
+  if (roundId) params.set("roundId", roundId);
+  params.set("limit", limit);
+  state.corrections = await api(`/api/corrections?${params.toString()}`);
 }
 
 function renderTokenQuality() {
@@ -304,6 +324,14 @@ function renderSyncStatus() {
   const tokenSince = syncState.lastTokenSyncSince ? formatDate(syncState.lastTokenSyncSince) : "-";
   const lastOnline = syncState.lastOnlineSyncAt ? formatDate(syncState.lastOnlineSyncAt) : "-";
   const error = syncState.lastError || "";
+  const tokenSummary = syncState.lastTokenSyncSummary || {};
+  const tokenBatch = tokenSummary.roundsChecked !== undefined
+    ? `${formatNumber.format(Number(tokenSummary.roundsChecked) || 0)} / ${formatNumber.format(Number(tokenSummary.limit) || 0)}`
+    : "-";
+  const onlineSummary = syncState.lastOnlineSyncSummary || {};
+  const onlineBatch = onlineSummary.processed !== undefined
+    ? `${formatNumber.format(Number(onlineSummary.processed) || 0)} / ${formatNumber.format(Number(onlineSummary.limit) || 0)}`
+    : "-";
 
   $("#syncStatusPanel").innerHTML = `
     <article class="sync-status-card">
@@ -320,8 +348,16 @@ function renderSyncStatus() {
         <strong>${escapeHtml(tokenSince)}</strong>
       </div>
       <div>
+        <span>Batch</span>
+        <strong>${escapeHtml(tokenBatch)}</strong>
+      </div>
+      <div>
         <span>Online Sync</span>
         <strong>${escapeHtml(lastOnline)}</strong>
+      </div>
+      <div>
+        <span>Online Batch</span>
+        <strong>${escapeHtml(onlineBatch)}</strong>
       </div>
       <div class="sync-error" title="${escapeHtml(error)}">
         <span>最近错误</span>
@@ -518,7 +554,7 @@ function renderRoundsTable() {
       <td>${escapeHtml(row.client || "-")}</td>
       <td class="number-cell">${formatNumber.format(row.codeLinesChanged)}</td>
       <td class="number-cell">${formatNumber.format(row.totalTokens)}</td>
-      <td><span class="status-pill ${row.isReverted ? "reverted" : ""}">${row.isReverted ? "已撤销" : "有效"}</span></td>
+      <td>${renderRoundStatus(row)}</td>
       <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(displayPrompt(row.promptText))}</td>
       <td>
         <button class="link-button" type="button" data-edit-round="${row.id}">编辑</button>
@@ -545,7 +581,7 @@ function renderRoundsTableDashboard() {
       <td class="number-cell">${formatNumber.format(row.totalTokens)}</td>
       <td>${renderTokenStatus(row)}</td>
       <td>${escapeHtml(row.tokenMatchQuality || "-")}</td>
-      <td><span class="status-pill ${row.isReverted ? "reverted" : ""}">${row.isReverted ? "已撤销" : "有效"}</span></td>
+      <td>${renderRoundStatus(row)}</td>
       <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(displayPrompt(row.promptText))}</td>
       <td>
         <button class="link-button" type="button" data-edit-round="${row.id}">编辑</button>
@@ -564,6 +600,47 @@ function renderTokenStatus(row) {
     .filter(Boolean)
     .join(" / ");
   return `<span class="status-pill ${className}" title="${escapeHtml(title)}">${escapeHtml(status)}</span>`;
+}
+
+function renderCorrections() {
+  $("#correctionStatus").textContent = `${formatNumber.format(state.corrections.length)} 条修正记录`;
+  $("#correctionsTable").innerHTML = state.corrections.map((row) => {
+    const before = summarizeCorrectionSide(row.before);
+    const after = summarizeCorrectionSide(row.after);
+    return `
+      <tr>
+        <td class="number-cell">${row.id}</td>
+        <td>${escapeHtml(row.correctionType)}</td>
+        <td class="number-cell">${row.roundId ?? "-"}</td>
+        <td>${escapeHtml([row.targetType, row.targetId].filter((value) => value !== null && value !== undefined).join("#") || "-")}</td>
+        <td>${escapeHtml(row.actor || "-")}</td>
+        <td class="prompt-cell" title="${escapeHtml(row.reason || "")}">${escapeHtml(row.reason || "-")}</td>
+        <td class="number-cell">${escapeHtml(formatDate(row.createdAt))}</td>
+        <td class="prompt-cell" title="${escapeHtml(`${before} -> ${after}`)}">${escapeHtml(`${before} -> ${after}`)}</td>
+      </tr>
+    `;
+  }).join("") || emptyRow(8);
+}
+
+function summarizeCorrectionSide(value) {
+  if (!value || typeof value !== "object") return "-";
+  const parts = [];
+  if ("requirementId" in value) parts.push(`req=${value.requirementId ?? "-"}`);
+  if ("totalTokens" in value) parts.push(`tokens=${formatNumber.format(Number(value.totalTokens) || 0)}`);
+  if ("tokenSyncStatus" in value) parts.push(`token=${value.tokenSyncStatus ?? "-"}`);
+  if ("ignoredForStats" in value) parts.push(`ignored=${value.ignoredForStats ? "yes" : "no"}`);
+  if ("tokenUsageEventId" in value) parts.push(`event=${value.tokenUsageEventId}`);
+  return parts.join(", ") || JSON.stringify(value).slice(0, 120);
+}
+
+function renderRoundStatus(row) {
+  if (row.isIgnored) {
+    return `<span class="status-pill reverted">已忽略</span>`;
+  }
+  if (row.isReverted) {
+    return `<span class="status-pill reverted">已撤销</span>`;
+  }
+  return `<span class="status-pill">有效</span>`;
 }
 
 function displayPrompt(value) {
@@ -638,6 +715,7 @@ function editRound(roundId) {
   $("#roundOutputTokensInput").value = String(record.outputTokens ?? 0);
   $("#roundTotalTokensInput").value = String(record.totalTokens ?? 0);
   $("#roundPromptInput").value = record.promptText || "";
+  updateRoundIgnoreButtons(record);
   setRoundMessage("");
   void loadTokenCandidates(roundId);
 }
@@ -646,8 +724,18 @@ function resetRoundForm() {
   state.editingRoundId = null;
   $("#roundForm")?.reset();
   $("#roundIdInput").value = "";
+  updateRoundIgnoreButtons(null);
   renderTokenCandidates(null);
   setRoundMessage("选择表格中的对话后可编辑");
+}
+
+function updateRoundIgnoreButtons(record) {
+  const ignoreButton = $("#ignoreRoundButton");
+  const restoreButton = $("#restoreRoundButton");
+  if (!ignoreButton || !restoreButton) return;
+  const hasRound = Boolean(record);
+  ignoreButton.disabled = !hasRound || Boolean(record?.isIgnored);
+  restoreButton.disabled = !hasRound || !record?.isIgnored;
 }
 
 async function saveRound(event) {
@@ -702,6 +790,40 @@ async function deleteRound(roundId = state.editingRoundId) {
   await loadPageData();
   renderFilters();
   setRoundMessage("已删除");
+}
+
+async function setRoundIgnored(ignored) {
+  const roundId = state.editingRoundId;
+  if (!roundId) {
+    setRoundMessage("请先选择一条对话", true);
+    return;
+  }
+
+  const reason = window.prompt(ignored ? "忽略这条对话的原因？" : "恢复这条对话的原因？", ignored ? "exclude from effective statistics" : "restore to effective statistics");
+  if (reason === null) return;
+
+  setRoundMessage(ignored ? "正在忽略..." : "正在恢复...");
+  await api(`/api/rounds/${roundId}/${ignored ? "ignore" : "restore"}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      actor: "dashboard",
+      reason
+    })
+  });
+
+  await loadFilters();
+  await loadPageData();
+  renderFilters();
+  const stillVisible = state.rounds.some((row) => row.id === roundId);
+  if (stillVisible) {
+    editRound(roundId);
+  } else {
+    resetRoundForm();
+  }
+  setRoundMessage(ignored ? "已忽略，默认统计将排除这条对话。" : "已恢复。");
 }
 
 async function resetRoundToken() {
@@ -1023,6 +1145,16 @@ function bindRoundEditor() {
       setRoundMessage(error instanceof Error ? error.message : "Retry token sync failed", true);
     });
   });
+  $("#ignoreRoundButton")?.addEventListener("click", () => {
+    void setRoundIgnored(true).catch((error) => {
+      setRoundMessage(error instanceof Error ? error.message : "忽略失败", true);
+    });
+  });
+  $("#restoreRoundButton")?.addEventListener("click", () => {
+    void setRoundIgnored(false).catch((error) => {
+      setRoundMessage(error instanceof Error ? error.message : "恢复失败", true);
+    });
+  });
   $("#roundForm").addEventListener("submit", (event) => {
     void saveRound(event).catch((error) => {
       setRoundMessage(error instanceof Error ? error.message : "保存失败", true);
@@ -1068,6 +1200,15 @@ function bindLocalLogs() {
   });
 }
 
+function bindCorrections() {
+  if (!$("#correctionsTable")) return;
+  $("#loadCorrectionsButton").addEventListener("click", () => {
+    void loadCorrections().then(renderCorrections).catch((error) => {
+      $("#correctionStatus").textContent = error instanceof Error ? error.message : "加载失败";
+    });
+  });
+}
+
 $("#logoutButton").addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" });
   location.href = "/login";
@@ -1079,4 +1220,5 @@ renderFilters();
 bindRequirementMaintenance();
 bindRoundEditor();
 bindLocalLogs();
+bindCorrections();
 await loadPageData();

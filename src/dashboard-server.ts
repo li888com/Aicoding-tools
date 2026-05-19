@@ -18,6 +18,7 @@ type FilterOptions = {
   client?: string;
   tokenSyncStatus?: string;
   includeReverted: boolean;
+  includeIgnored: boolean;
 };
 
 type RequirementRecordInput = {
@@ -174,6 +175,11 @@ async function handleApi(request: IncomingMessage, url: URL, response: ServerRes
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/corrections") {
+    sendJson(response, 200, await getCorrections(url.searchParams));
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/sync-status") {
     sendJson(response, 200, await getSyncStatus());
     return;
@@ -240,6 +246,20 @@ async function handleApi(request: IncomingMessage, url: URL, response: ServerRes
     return;
   }
 
+  const ignoreRoundMatch = url.pathname.match(/^\/api\/rounds\/([1-9]\d*)\/ignore$/);
+  if (ignoreRoundMatch && request.method === "POST") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await setRoundIgnored(Number(ignoreRoundMatch[1]), true, body));
+    return;
+  }
+
+  const restoreRoundMatch = url.pathname.match(/^\/api\/rounds\/([1-9]\d*)\/restore$/);
+  if (restoreRoundMatch && request.method === "POST") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await setRoundIgnored(Number(restoreRoundMatch[1]), false, body));
+    return;
+  }
+
   if (roundMatch && request.method === "PUT") {
     const body = await readJsonBody(request);
     sendJson(response, 200, await updateRoundRecord(Number(roundMatch[1]), body));
@@ -263,7 +283,12 @@ function parseFilters(searchParams: URLSearchParams): FilterOptions {
     client: searchParams.get("client") || undefined,
     tokenSyncStatus: searchParams.get("tokenSyncStatus") || undefined,
     includeReverted: searchParams.get("includeReverted") === "true",
+    includeIgnored: searchParams.get("includeIgnored") === "true",
   };
+}
+
+function isRoundIgnored(round: localStorage.Round): boolean {
+  return Boolean(round.metadata && typeof round.metadata === "object" && round.metadata.ignoredForStats === true);
 }
 
 function getRoundClient(round: localStorage.Round): string | null {
@@ -329,6 +354,9 @@ function filterRoundsBase(rounds: localStorage.Round[], filters: FilterOptions):
       return false;
     }
     if (filters.tokenSyncStatus && round.tokenSyncStatus !== filters.tokenSyncStatus) {
+      return false;
+    }
+    if (!filters.includeIgnored && isRoundIgnored(round)) {
       return false;
     }
     if (filters.requirementId) {
@@ -675,6 +703,7 @@ async function getRounds(filters: FilterOptions, limit: number) {
       tokenSyncedAt: round.tokenSyncedAt,
       tokenSyncNote: round.tokenSyncNote,
       isReverted: revertedRoundIds.has(round.id),
+      isIgnored: isRoundIgnored(round),
       promptText: round.promptText ?? "",
     };
   });
@@ -971,6 +1000,38 @@ async function getRoundTokenCandidates(roundId: number) {
   };
 }
 
+async function getCorrections(searchParams: URLSearchParams) {
+  const roundIdRaw = searchParams.get("roundId");
+  const roundId = roundIdRaw ? Number(roundIdRaw) : undefined;
+  if (roundIdRaw && (!Number.isSafeInteger(roundId) || Number(roundId) <= 0)) {
+    throw new Error("roundId must be a positive integer");
+  }
+
+  const limitRaw = Number(searchParams.get("limit") ?? 100);
+  const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
+  const corrections = await localStorage.getAiCodingCorrections(roundId);
+  return corrections
+    .slice()
+    .sort((a, b) => {
+      const time = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (time !== 0) return time;
+      return b.id - a.id;
+    })
+    .slice(0, limit)
+    .map((correction) => ({
+      id: correction.id,
+      correctionType: correction.correctionType,
+      targetType: correction.targetType,
+      targetId: correction.targetId,
+      roundId: correction.roundId,
+      actor: correction.actor,
+      reason: correction.reason,
+      before: correction.before,
+      after: correction.after,
+      createdAt: correction.createdAt,
+    }));
+}
+
 async function bindTokenCandidate(roundId: number, candidateId: number, input: Record<string, unknown>) {
   const [round, candidate] = await Promise.all([
     localStorage.getRound(roundId),
@@ -1169,6 +1230,51 @@ async function retryRoundTokenSync(roundId: number, input: Record<string, unknow
   };
 }
 
+async function setRoundIgnored(roundId: number, ignored: boolean, input: Record<string, unknown>) {
+  const round = await localStorage.getRound(roundId);
+  if (!round) {
+    throw new Error("Round not found");
+  }
+
+  const actor = actorFromInput(input);
+  const reason = reasonFromInput(input) ?? (ignored ? "ignore round from effective statistics" : "restore round to effective statistics");
+  const before = roundMetadataSnapshot(round);
+  const metadata = round.metadata && typeof round.metadata === "object" ? { ...round.metadata } : {};
+  if (ignored) {
+    metadata.ignoredForStats = true;
+    metadata.ignoredAt = new Date().toISOString();
+    metadata.ignoredReason = reason;
+  } else {
+    delete metadata.ignoredForStats;
+    delete metadata.ignoredAt;
+    delete metadata.ignoredReason;
+  }
+
+  const updated: localStorage.Round = {
+    ...round,
+    metadata,
+  };
+  await localStorage.updateRound(updated);
+
+  const correction = await localStorage.createAiCodingCorrection({
+    correctionType: ignored ? "round_ignore" : "round_restore",
+    targetType: "round",
+    targetId: roundId,
+    roundId,
+    actor,
+    reason,
+    before,
+    after: roundMetadataSnapshot(updated),
+  });
+
+  return {
+    ok: true,
+    roundId,
+    ignored,
+    correctionId: correction.id,
+  };
+}
+
 function actorFromInput(input: Record<string, unknown>): string {
   return typeof input.actor === "string" && input.actor.trim() ? input.actor.trim() : "dashboard";
 }
@@ -1188,6 +1294,16 @@ function roundTokenSnapshot(round: localStorage.Round): Record<string, unknown> 
     tokenSyncStatus: round.tokenSyncStatus,
     tokenSyncedAt: round.tokenSyncedAt,
     tokenSyncNote: round.tokenSyncNote,
+  };
+}
+
+function roundMetadataSnapshot(round: localStorage.Round): Record<string, unknown> {
+  return {
+    requirementId: round.requirementId,
+    modelName: round.modelName,
+    promptText: round.promptText,
+    ignoredForStats: isRoundIgnored(round),
+    metadata: round.metadata ?? null,
   };
 }
 

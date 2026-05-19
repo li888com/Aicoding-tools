@@ -10,6 +10,8 @@ type Args = {
   onlineIntervalMs: number;
   sinceHours: number;
   lookbackMs: number;
+  tokenLimit: number;
+  onlineLimit: number;
   once: boolean;
 };
 
@@ -93,7 +95,14 @@ async function main(): Promise<void> {
 
 async function runTokenSync(): Promise<void> {
   const { since, source } = await computeTokenSince();
-  const result = await runScript("scripts/sync-token-usage.ts", ["--project", projectRoot, "--since", since]);
+  const result = await runScript("scripts/sync-token-usage.ts", [
+    "--project",
+    projectRoot,
+    "--since",
+    since,
+    "--limit",
+    String(args.tokenLimit),
+  ]);
   const parsed = parseJsonOutput(result.stdout);
   await localStorage.patchAutoSyncState({
     workerId,
@@ -103,6 +112,7 @@ async function runTokenSync(): Promise<void> {
     lastTokenSyncSummary: {
       ...parsed,
       since,
+      limit: args.tokenLimit,
       checkpointSource: source,
       exitCode: result.exitCode,
       stderr: result.stderr.slice(-2000),
@@ -137,6 +147,8 @@ async function runOnlineSync(): Promise<void> {
       lastOnlineSyncStatus: "skipped",
       lastOnlineSyncSummary: {
         skipped: true,
+        processed: 0,
+        limit: args.onlineLimit,
         reason: "SYNC_API_TOKEN is not configured",
       },
       lastError: null,
@@ -144,7 +156,7 @@ async function runOnlineSync(): Promise<void> {
     return;
   }
 
-  const result = await runScript("scripts/sync-to-online.ts", []);
+  const result = await runScript("scripts/sync-to-online.ts", ["--limit", String(args.onlineLimit)]);
   const summary = parseOnlineSyncSummary(result.stdout);
   await localStorage.patchAutoSyncState({
     workerId,
@@ -152,6 +164,7 @@ async function runOnlineSync(): Promise<void> {
     lastOnlineSyncStatus: result.ok ? "ok" : "failed",
     lastOnlineSyncSummary: {
       ...summary,
+      limit: args.onlineLimit,
       exitCode: result.exitCode,
       stderr: result.stderr.slice(-2000),
     },
@@ -207,6 +220,8 @@ function parseArgs(argv: string[]): Args {
     onlineIntervalMs: readNumberEnv("AUTO_SYNC_ONLINE_INTERVAL_MS", 10 * 60 * 1000),
     sinceHours: readNumberEnv("AUTO_SYNC_SINCE_HOURS", 24),
     lookbackMs: readNumberEnv("AUTO_SYNC_LOOKBACK_MS", 30 * 60 * 1000),
+    tokenLimit: readNumberEnv("AUTO_SYNC_TOKEN_LIMIT", 200),
+    onlineLimit: readNumberEnv("AUTO_SYNC_ONLINE_LIMIT", 200),
     once: false,
   };
 
@@ -225,9 +240,22 @@ function parseArgs(argv: string[]): Args {
     } else if (arg === "--lookback-ms" && next) {
       parsed.lookbackMs = Number(next);
       index += 1;
+    } else if (arg === "--token-limit" && next) {
+      parsed.tokenLimit = Number(next);
+      index += 1;
+    } else if (arg === "--online-limit" && next) {
+      parsed.onlineLimit = Number(next);
+      index += 1;
     } else if (arg === "--once") {
       parsed.once = true;
     }
+  }
+
+  if (!Number.isSafeInteger(parsed.tokenLimit) || parsed.tokenLimit <= 0) {
+    throw new Error("--token-limit must be a positive integer");
+  }
+  if (!Number.isSafeInteger(parsed.onlineLimit) || parsed.onlineLimit <= 0) {
+    throw new Error("--online-limit must be a positive integer");
   }
 
   return parsed;

@@ -15,6 +15,7 @@ type Args = {
   roundId?: number;
   project?: string;
   since?: string;
+  limit: number;
   dryRun: boolean;
 };
 
@@ -266,7 +267,7 @@ async function loadPendingRounds(args: Args): Promise<RoundRow[]> {
       if (timeA !== timeB) return timeA - timeB;
       return a.id - b.id;
     })
-    .slice(0, 200)
+    .slice(0, args.limit)
     .map((round): RoundRow => ({
       id: round.id,
       conversation_id: round.conversationId,
@@ -920,7 +921,7 @@ async function* readJsonLines(filePath: string): AsyncGenerator<unknown> {
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { dryRun: false };
+  const args: Args = { dryRun: false, limit: readNumberEnv("TOKEN_SYNC_LIMIT", 200) };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
@@ -939,11 +940,24 @@ function parseArgs(argv: string[]): Args {
     } else if (arg === "--since" && next) {
       args.since = next;
       index += 1;
+    } else if (arg === "--limit" && next) {
+      args.limit = Number(next);
+      index += 1;
     } else if (arg === "--dry-run") {
       args.dryRun = true;
     }
   }
+  if (!Number.isSafeInteger(args.limit) || args.limit <= 0) {
+    throw new Error("--limit must be a positive integer");
+  }
   return args;
+}
+
+function readNumberEnv(name: string, fallback: number): number {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function parseMetadata(metadataJson: string | null): Record<string, unknown> {

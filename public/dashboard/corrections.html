@@ -1,16 +1,16 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>按需求统计 - AI Coding 统计</title>
+    <title>修正审计 - AI Coding 统计</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
-  <body data-page="requirements">
+  <body data-page="corrections">
     <header class="topbar">
       <div>
         <p class="eyebrow">AI Coding Stats</p>
-        <h1>按需求统计</h1>
+        <h1>修正审计</h1>
       </div>
       <button id="logoutButton" class="secondary-button" type="button">退出</button>
     </header>
@@ -21,37 +21,44 @@
       <a href="/timeline.html" data-nav="timeline">按日期</a>
       <a href="/rounds.html" data-nav="rounds">对话详情</a>
       <a href="/requirement-maintenance.html" data-nav="requirement-maintenance">需求维护</a>
-            <a href="/corrections.html" data-nav="corrections">修正审计</a>
-<a href="/local-logs.html" data-nav="local-logs">本地日志</a>
+      <a href="/corrections.html" data-nav="corrections">修正审计</a>
+      <a href="/local-logs.html" data-nav="local-logs">本地日志</a>
     </nav>
     <main class="workspace">
-      <section id="filters" class="filters" aria-label="筛选条件"></section>
+      <section class="filters correction-filters" aria-label="修正筛选">
+        <label>
+          Round ID
+          <input id="correctionRoundIdInput" type="number" min="1" step="1" placeholder="全部">
+        </label>
+        <label>
+          返回条数
+          <input id="correctionLimitInput" type="number" min="1" max="500" value="100">
+        </label>
+        <button id="loadCorrectionsButton" type="button">加载</button>
+      </section>
       <article class="panel">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Requirements</p>
-            <h2>需求效率与生成时间</h2>
+            <p class="eyebrow">Corrections</p>
+            <h2>修正记录</h2>
           </div>
+          <small id="correctionStatus" class="muted-block"></small>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>需求</th>
-                <th>项目 / GPM</th>
-                <th>轮次</th>
-                <th>AI生成代码时间</th>
-                <th>首轮开始</th>
-                <th>末轮结束</th>
-                <th>代码改动</th>
-                <th>Token</th>
-                <th>Token completeness</th>
-                <th>Pending</th>
-                <th>Token issues</th>
-                <th>行/千Token</th>
+                <th>ID</th>
+                <th>类型</th>
+                <th>Round</th>
+                <th>目标</th>
+                <th>操作人</th>
+                <th>原因</th>
+                <th>时间</th>
+                <th>变更</th>
               </tr>
             </thead>
-            <tbody id="requirementsTable"></tbody>
+            <tbody id="correctionsTable"></tbody>
           </table>
         </div>
       </article>
@@ -59,4 +66,3 @@
     <script src="/app.js" type="module"></script>
   </body>
 </html>
-

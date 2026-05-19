@@ -899,6 +899,30 @@ Dashboard 增加“数据修正”能力：
 6. 撤销或恢复某条 revert 记录。
 7. 所有修正都写审计日志。
 
+当前已落地的修正能力：
+
+- 修改 round 基础字段和需求归属。
+- `ambiguous` 候选 token event 人工绑定。
+- 清除错误 token 并恢复为 `pending`。
+- 重新触发单条 round 的 token sync。
+- 标记 round 为忽略统计，并支持恢复。
+- 修正操作写入 `aiCodingCorrections` 审计记录。
+- Dashboard 已提供“修正审计”页面，可按 roundId 查看修正历史。
+
+忽略统计采用软标记，不删除原始 round：
+
+```json
+{
+  "metadata": {
+    "ignoredForStats": true,
+    "ignoredAt": "ISO-8601",
+    "ignoredReason": "reason"
+  }
+}
+```
+
+Dashboard 默认排除被忽略 round，可通过 `includeIgnored=true` 查看并恢复。
+
 建议增加修正事件表：
 
 ```text
@@ -1198,6 +1222,8 @@ AUTO_SYNC_TOKEN_INTERVAL_MS = 180000
 AUTO_SYNC_ONLINE_INTERVAL_MS = 600000
 AUTO_SYNC_SINCE_HOURS = 24
 AUTO_SYNC_LOOKBACK_MS = 1800000
+AUTO_SYNC_TOKEN_LIMIT = 200
+AUTO_SYNC_ONLINE_LIMIT = 200
 ```
 
 `AUTO_SYNC_SINCE_HOURS` 是兜底扫描窗口。worker 已有上次成功 token sync 时间时，会优先用 checkpoint，并向前回看 `AUTO_SYNC_LOOKBACK_MS`，避免日志落盘延迟导致漏扫。
@@ -1212,6 +1238,8 @@ powershell -ExecutionPolicy Bypass -File scripts/start-auto-sync.ps1
 
 - worker 是否运行
 - 本轮 token 扫描起点
+- 本轮 token 处理数量和批量上限
+- 本轮 online 处理数量和批量上限
 - 最近 token sync 时间
 - 最近 online sync 时间
 - 最近错误

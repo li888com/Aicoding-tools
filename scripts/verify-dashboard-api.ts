@@ -52,6 +52,7 @@ try {
     "/timeline.html",
     "/rounds.html",
     "/requirement-maintenance.html",
+    "/corrections.html",
     "/local-logs.html"
   ];
 
@@ -80,6 +81,7 @@ try {
     "/api/timeline",
     "/api/rounds",
     "/api/filters",
+    "/api/corrections?limit=5",
     "/api/sync-status",
     "/api/local-logs/files?client=codex&limit=5",
     "/api/local-logs/files?client=claude-code&limit=5",
@@ -319,6 +321,52 @@ try {
   const retryTokenSyncBody = await retryTokenSync.json();
   if (!["synced", "not_found", "ambiguous", "failed", "pending"].includes(String(retryTokenSyncBody.tokenSyncStatus))) {
     throw new Error(`Unexpected token sync retry payload: ${JSON.stringify(retryTokenSyncBody)}`);
+  }
+
+  const ignoreRound = await fetch(`${baseUrl}/api/rounds/${testRoundId}/ignore`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      actor: "dashboard-api-test",
+      reason: "verify round ignore"
+    })
+  });
+
+  if (!ignoreRound.ok) {
+    throw new Error(`Round ignore failed with status ${ignoreRound.status}: ${await ignoreRound.text()}`);
+  }
+
+  const ignoredRounds = await fetch(`${baseUrl}/api/rounds?includeIgnored=true`, {
+    headers: {
+      Cookie: cookie
+    }
+  });
+  if (!ignoredRounds.ok) {
+    throw new Error(`Ignored round list failed with status ${ignoredRounds.status}: ${await ignoredRounds.text()}`);
+  }
+  const ignoredRoundsBody = await ignoredRounds.json() as Array<Record<string, unknown>>;
+  const ignoredRound = ignoredRoundsBody.find((round) => round.id === testRoundId);
+  if (!ignoredRound || ignoredRound.isIgnored !== true) {
+    throw new Error(`Ignored round was not visible with includeIgnored=true: ${JSON.stringify(ignoredRoundsBody)}`);
+  }
+
+  const restoreRound = await fetch(`${baseUrl}/api/rounds/${testRoundId}/restore`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      actor: "dashboard-api-test",
+      reason: "verify round restore"
+    })
+  });
+
+  if (!restoreRound.ok) {
+    throw new Error(`Round restore failed with status ${restoreRound.status}: ${await restoreRound.text()}`);
   }
 
   const deletedRound = await fetch(`${baseUrl}/api/rounds/${testRoundId}`, {

@@ -134,7 +134,7 @@ type TokenUsageCandidate = {
 
 type AiCodingCorrection = {
   id: number;
-  correctionType: "token_manual_bind" | "token_reset" | "round_update";
+  correctionType: "token_manual_bind" | "token_reset" | "round_update" | "round_ignore" | "round_restore";
   targetType: "round" | "token_usage_candidate" | "token_usage_event";
   targetId: number | null;
   roundId: number | null;

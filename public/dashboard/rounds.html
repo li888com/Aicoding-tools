@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8">
@@ -21,7 +21,8 @@
       <a href="/timeline.html" data-nav="timeline">按日期</a>
       <a href="/rounds.html" data-nav="rounds">对话详情</a>
       <a href="/requirement-maintenance.html" data-nav="requirement-maintenance">需求维护</a>
-      <a href="/local-logs.html" data-nav="local-logs">本地日志</a>
+            <a href="/corrections.html" data-nav="corrections">修正审计</a>
+<a href="/local-logs.html" data-nav="local-logs">本地日志</a>
     </nav>
     <main class="workspace">
       <section id="filters" class="filters" aria-label="筛选条件"></section>
@@ -93,6 +94,8 @@
           <div class="form-actions">
             <button id="retryTokenSyncButton" class="secondary-button" type="button">Retry token sync</button>
             <button id="resetTokenButton" class="secondary-button" type="button">Reset token</button>
+            <button id="ignoreRoundButton" class="secondary-button" type="button">忽略统计</button>
+            <button id="restoreRoundButton" class="secondary-button" type="button">恢复统计</button>
             <button id="saveRoundButton" type="submit">保存对话</button>
             <button id="deleteRoundButton" class="danger-button" type="button">删除对话</button>
           </div>
@@ -159,3 +162,4 @@
     <script src="/app.js" type="module"></script>
   </body>
 </html>
+

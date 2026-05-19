@@ -104,10 +104,11 @@ type SyncReport = {
   tokenUsageEvents: number;
   skipped: number;
   failed: number;
+  processed: number;
 };
 
-const args = new Set(process.argv.slice(2));
-const dryRun = args.has("--dry-run");
+const args = parseArgs(process.argv.slice(2));
+const dryRun = args.dryRun;
 const storagePath = resolve(
   process.env.MCP_TOOLBOX_STORAGE_FILE?.trim() ||
     resolve(process.env.MCP_TOOLBOX_STORAGE_DIR?.trim() || ".mcp-toolbox", "data.json")
@@ -121,7 +122,15 @@ async function main(): Promise<void> {
   }
 
   const data = await loadData();
-  const report: SyncReport = { requirements: 0, rounds: 0, roundReverts: 0, tokenUsageEvents: 0, skipped: 0, failed: 0 };
+  const report: SyncReport = {
+    requirements: 0,
+    rounds: 0,
+    roundReverts: 0,
+    tokenUsageEvents: 0,
+    skipped: 0,
+    failed: 0,
+    processed: 0,
+  };
   const idMap = buildRoundIdMap(data.rounds || []);
 
   await syncRequirements(data, report);
@@ -151,6 +160,7 @@ async function saveData(data: StorageData): Promise<void> {
 async function syncRequirements(data: StorageData, report: SyncReport): Promise<void> {
   for (const requirement of data.requirements || []) {
     if (!shouldUpload(requirement)) continue;
+    if (isLimitReached(report)) break;
     await uploadItem(
       requirement,
       report,
@@ -174,6 +184,7 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
 
   for (const round of data.rounds || []) {
     if (!shouldUpload(round)) continue;
+    if (isLimitReached(report)) break;
 
     const requirement = round.requirementId === null ? undefined : requirementsById.get(round.requirementId);
     await uploadItem(
@@ -223,11 +234,13 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
 async function syncRoundReverts(data: StorageData, idMap: Map<number, number>, report: SyncReport): Promise<void> {
   for (const revert of data.roundReverts || []) {
     if (!shouldUpload(revert)) continue;
+    if (isLimitReached(report)) break;
 
     const onlineTargetRoundId = idMap.get(revert.targetRoundId);
     if (!onlineTargetRoundId) {
       markFailed(revert, `Missing online id for target round ${revert.targetRoundId}`);
       report.failed += 1;
+      report.processed += 1;
       await saveCheckpoint(data);
       continue;
     }
@@ -258,10 +271,12 @@ async function syncRoundReverts(data: StorageData, idMap: Map<number, number>, r
 async function syncTokenUsageEvents(data: StorageData, idMap: Map<number, number>, report: SyncReport): Promise<void> {
   for (const event of data.tokenUsageEvents || []) {
     if (!shouldUpload(event)) continue;
+    if (isLimitReached(report)) break;
 
     if (event.roundId === null) {
       markSkipped(event, "Token usage event has no roundId.");
       report.skipped += 1;
+      report.processed += 1;
       await saveCheckpoint(data);
       continue;
     }
@@ -270,6 +285,7 @@ async function syncTokenUsageEvents(data: StorageData, idMap: Map<number, number
     if (!onlineRoundId) {
       markFailed(event, `Missing online id for round ${event.roundId}`);
       report.failed += 1;
+      report.processed += 1;
       await saveCheckpoint(data);
       continue;
     }
@@ -310,6 +326,7 @@ async function uploadItem<T extends { _sync?: SyncState }>(
   try {
     if (dryRun) {
       report[key] += 1;
+      report.processed += 1;
       return;
     }
 
@@ -317,9 +334,11 @@ async function uploadItem<T extends { _sync?: SyncState }>(
     const returnedId = typeof result === "number" ? result : onlineId;
     markSynced(item, returnedId);
     report[key] += 1;
+    report.processed += 1;
   } catch (error) {
     markFailed(item, error instanceof Error ? error.message : String(error));
     report.failed += 1;
+    report.processed += 1;
   }
 }
 
@@ -360,6 +379,10 @@ function shouldUpload(item: { _sync?: SyncState }): boolean {
   return item._sync?.status !== "synced" && item._sync?.status !== "skipped";
 }
 
+function isLimitReached(report: SyncReport): boolean {
+  return report.processed >= args.limit;
+}
+
 function markSynced(item: { _sync?: SyncState }, onlineId?: number): void {
   item._sync = {
     status: "synced",
@@ -398,12 +421,45 @@ function parseOnlineId(value: number | string | undefined, label: string): numbe
 function printReport(report: SyncReport): void {
   console.log(`Sync ${dryRun ? "dry run" : "completed"} for ${storagePath}`);
   console.log(`API base: ${baseUrl}`);
+  console.log(`limit: ${args.limit}`);
+  console.log(`processed: ${report.processed}`);
   console.log(`requirements: ${report.requirements}`);
   console.log(`rounds: ${report.rounds}`);
   console.log(`roundReverts: ${report.roundReverts}`);
   console.log(`tokenUsageEvents: ${report.tokenUsageEvents}`);
   console.log(`skipped: ${report.skipped}`);
   console.log(`failed: ${report.failed}`);
+}
+
+function parseArgs(argv: string[]): { dryRun: boolean; limit: number } {
+  const parsed = {
+    dryRun: false,
+    limit: readNumberEnv("ONLINE_SYNC_LIMIT", 200),
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+    if (arg === "--dry-run") {
+      parsed.dryRun = true;
+    } else if (arg === "--limit" && next) {
+      parsed.limit = Number(next);
+      index += 1;
+    }
+  }
+
+  if (!Number.isSafeInteger(parsed.limit) || parsed.limit <= 0) {
+    throw new Error("--limit must be a positive integer");
+  }
+
+  return parsed;
+}
+
+function readNumberEnv(name: string, fallback: number): number {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 main().catch((error) => {
