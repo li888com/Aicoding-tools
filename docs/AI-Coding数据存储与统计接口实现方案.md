@@ -1184,6 +1184,35 @@ P3: 权限隔离 + 完整统计口径 + 脱敏预留
    - 单次限制处理数量
 5. 所有测试脚本默认使用临时 storage。
 
+当前已落地的自动化入口：
+
+```bash
+npm run auto-sync
+npm run auto-sync:once
+```
+
+`auto-sync` 会循环执行 token 回填和线上同步，并通过 `.mcp-toolbox/auto-sync.lock` 加锁，避免同一项目重复启动多个同步进程。默认参数：
+
+```text
+AUTO_SYNC_TOKEN_INTERVAL_MS = 180000
+AUTO_SYNC_ONLINE_INTERVAL_MS = 600000
+AUTO_SYNC_SINCE_HOURS = 24
+```
+
+Windows 本地可用以下脚本后台启动：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start-auto-sync.ps1
+```
+
+运行状态会写入本地 `autoSyncState`，Dashboard 通过 `/api/sync-status` 展示：
+
+- worker 是否运行
+- 最近 token sync 时间
+- 最近 online sync 时间
+- 最近错误
+- 未配置 `SYNC_API_TOKEN` 时，online sync 显示为 `skipped`，不按失败处理
+
 ### 14.4 运维任务
 
 1. 配置 `SYNC_API_BASE_URL` 和 `SYNC_API_TOKEN`。
@@ -1231,6 +1260,7 @@ P3: 权限隔离 + 完整统计口径 + 脱敏预留
 4. Round 明细支持按 `tokenSyncStatus` 筛选。
 5. `ambiguous` 能跳转到人工处理入口。
 6. 被撤销 round 默认不进入有效统计。
+7. 总览页能看到自动同步状态、最近 token sync 时间、最近 online sync 时间和最近错误。
 
 ### 15.5 数据隔离验收
 

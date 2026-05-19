@@ -174,6 +174,11 @@ async function handleApi(request: IncomingMessage, url: URL, response: ServerRes
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/sync-status") {
+    sendJson(response, 200, await getSyncStatus());
+    return;
+  }
+
   const filters = parseFilters(url.searchParams);
 
   if (request.method === "GET" && url.pathname === "/api/summary") {
@@ -439,6 +444,20 @@ async function getSummary(filters: FilterOptions) {
     tokenCompletenessRate,
     lastTokenSyncedAt,
     lastOnlineSyncedAt,
+  };
+}
+
+async function getSyncStatus() {
+  const state = await localStorage.getAutoSyncState();
+  const now = Date.now();
+  const heartbeatAt = state?.lastHeartbeatAt ? new Date(state.lastHeartbeatAt).getTime() : 0;
+  const running = Boolean(state && state.status === "running" && heartbeatAt > 0 && now - heartbeatAt < 2 * 60 * 1000);
+
+  return {
+    configured: true,
+    running,
+    stale: Boolean(state && state.status === "running" && (!heartbeatAt || now - heartbeatAt >= 2 * 60 * 1000)),
+    state,
   };
 }
 

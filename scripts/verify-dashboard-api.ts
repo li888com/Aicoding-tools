@@ -80,6 +80,7 @@ try {
     "/api/timeline",
     "/api/rounds",
     "/api/filters",
+    "/api/sync-status",
     "/api/local-logs/files?client=codex&limit=5",
     "/api/local-logs/files?client=claude-code&limit=5",
     "/api/summary?includeReverted=true",
@@ -119,6 +120,11 @@ try {
   const filters = results["/api/filters"] as Record<string, unknown>;
   if (!Array.isArray(filters.tokenSyncStatuses)) {
     throw new Error("/api/filters is missing tokenSyncStatuses");
+  }
+
+  const syncStatus = results["/api/sync-status"] as Record<string, unknown>;
+  if (!("running" in syncStatus) || !("state" in syncStatus)) {
+    throw new Error(`/api/sync-status returned unexpected payload: ${JSON.stringify(syncStatus)}`);
   }
 
   const saved = await fetch(`${baseUrl}/api/requirement-records/${testRequirementId}`, {

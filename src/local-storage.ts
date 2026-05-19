@@ -145,6 +145,21 @@ type AiCodingCorrection = {
   createdAt: string;
 };
 
+type AutoSyncState = {
+  workerId: string | null;
+  status: "idle" | "running" | "stopped" | "failed";
+  startedAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastTokenSyncAt: string | null;
+  lastOnlineSyncAt: string | null;
+  lastTokenSyncStatus: string | null;
+  lastOnlineSyncStatus: string | null;
+  lastTokenSyncSummary: Record<string, unknown> | null;
+  lastOnlineSyncSummary: Record<string, unknown> | null;
+  lastError: string | null;
+  updatedAt: string;
+};
+
 type StorageData = {
   conversations: Conversation[];
   requirements: Requirement[];
@@ -153,6 +168,7 @@ type StorageData = {
   tokenUsageEvents: TokenUsageEvent[];
   tokenUsageCandidates: TokenUsageCandidate[];
   aiCodingCorrections: AiCodingCorrection[];
+  autoSyncState: AutoSyncState | null;
   nextRoundId: number;
   nextRoundRevertId: number;
   nextTokenUsageEventId: number;
@@ -251,6 +267,7 @@ async function loadData(forceReload = false): Promise<StorageData> {
       tokenUsageEvents: [],
       tokenUsageCandidates: [],
       aiCodingCorrections: [],
+      autoSyncState: null,
       nextRoundId: 1,
       nextRoundRevertId: 1,
       nextTokenUsageEventId: 1,
@@ -273,6 +290,7 @@ function normalizeStorageData(value: unknown): StorageData {
   storage.tokenUsageEvents = Array.isArray(storage.tokenUsageEvents) ? storage.tokenUsageEvents : [];
   storage.tokenUsageCandidates = Array.isArray(storage.tokenUsageCandidates) ? storage.tokenUsageCandidates : [];
   storage.aiCodingCorrections = Array.isArray(storage.aiCodingCorrections) ? storage.aiCodingCorrections : [];
+  storage.autoSyncState = isRecord(storage.autoSyncState) ? storage.autoSyncState as AutoSyncState : null;
 
   storage.nextRoundId = normalizeNextId(storage.nextRoundId, storage.rounds);
   storage.nextRoundRevertId = normalizeNextId(storage.nextRoundRevertId, storage.roundReverts);
@@ -321,6 +339,7 @@ export type {
   TokenUsageEvent,
   TokenUsageCandidate,
   AiCodingCorrection,
+  AutoSyncState,
   StorageData
 };
 
@@ -597,6 +616,44 @@ export async function getAiCodingCorrections(roundId?: number): Promise<AiCoding
   return roundId === undefined ? corrections : corrections.filter((correction) => correction.roundId === roundId);
 }
 
+export async function getAutoSyncState(): Promise<AutoSyncState | null> {
+  const data = await loadData();
+  return data.autoSyncState;
+}
+
+export async function saveAutoSyncState(state: AutoSyncState): Promise<void> {
+  await withStorageLock(async () => {
+    const data = await loadData(true);
+    data.autoSyncState = state;
+    await saveData(data);
+  });
+}
+
+export async function patchAutoSyncState(patch: Partial<AutoSyncState>): Promise<AutoSyncState> {
+  return withStorageLock(async () => {
+    const data = await loadData(true);
+    const now = new Date().toISOString();
+    const current: AutoSyncState = data.autoSyncState ?? {
+      workerId: null,
+      status: "idle",
+      startedAt: null,
+      lastHeartbeatAt: null,
+      lastTokenSyncAt: null,
+      lastOnlineSyncAt: null,
+      lastTokenSyncStatus: null,
+      lastOnlineSyncStatus: null,
+      lastTokenSyncSummary: null,
+      lastOnlineSyncSummary: null,
+      lastError: null,
+      updatedAt: now,
+    };
+    const next: AutoSyncState = { ...current, ...patch, updatedAt: now };
+    data.autoSyncState = next;
+    await saveData(data);
+    return next;
+  });
+}
+
 export async function deleteAiCodingCorrectionsByRound(roundId: number): Promise<number> {
   return withStorageLock(async () => {
     const data = await loadData(true);
@@ -620,6 +677,7 @@ export async function clearAllData(): Promise<void> {
       tokenUsageEvents: [],
       tokenUsageCandidates: [],
       aiCodingCorrections: [],
+      autoSyncState: null,
       nextRoundId: 1,
       nextRoundRevertId: 1,
       nextTokenUsageEventId: 1,

@@ -8,6 +8,7 @@ const state = {
   models: [],
   timeline: [],
   rounds: [],
+  syncStatus: null,
   editingRequirementId: null,
   editingRoundId: null,
   localLogFiles: [],
@@ -198,14 +199,16 @@ async function loadPageData() {
   const query = filterQuery();
 
   if (page === "overview") {
-    const [summary, requirements, models] = await Promise.all([
+    const [summary, requirements, models, syncStatus] = await Promise.all([
       api(`/api/summary${query}`),
       api(`/api/requirements${query}`),
-      api(`/api/models${query}`)
+      api(`/api/models${query}`),
+      api("/api/sync-status")
     ]);
     state.summary = summary;
     state.requirements = requirements;
     state.models = models;
+    state.syncStatus = syncStatus;
   } else if (page === "requirements") {
     state.requirements = await api(`/api/requirements${query}`);
   } else if (page === "models") {
@@ -237,6 +240,7 @@ async function loadLocalLogFiles() {
 
 function renderPage() {
   if ($("#kpiGrid")) renderKpis();
+  if ($("#syncStatusPanel")) renderSyncStatus();
   if ($("#tokenQualityGrid")) renderTokenQualityDashboard();
   if ($("#requirementChart")) renderRequirementChart();
   if ($("#modelChart")) renderModelChart();
@@ -288,6 +292,38 @@ function renderTokenQualityDashboard() {
       <small>${escapeHtml(detail)}</small>
     </article>
   `).join("");
+}
+
+function renderSyncStatus() {
+  const payload = state.syncStatus;
+  if (!payload) return;
+
+  const syncState = payload.state ?? {};
+  const status = payload.running ? "运行中" : payload.stale ? "心跳过期" : syncState.status || "未运行";
+  const lastToken = syncState.lastTokenSyncAt ? formatDate(syncState.lastTokenSyncAt) : "-";
+  const lastOnline = syncState.lastOnlineSyncAt ? formatDate(syncState.lastOnlineSyncAt) : "-";
+  const error = syncState.lastError || "";
+
+  $("#syncStatusPanel").innerHTML = `
+    <article class="sync-status-card">
+      <div>
+        <span>自动同步</span>
+        <strong>${escapeHtml(status)}</strong>
+      </div>
+      <div>
+        <span>Token Sync</span>
+        <strong>${escapeHtml(lastToken)}</strong>
+      </div>
+      <div>
+        <span>Online Sync</span>
+        <strong>${escapeHtml(lastOnline)}</strong>
+      </div>
+      <div class="sync-error" title="${escapeHtml(error)}">
+        <span>最近错误</span>
+        <strong>${escapeHtml(error || "-")}</strong>
+      </div>
+    </article>
+  `;
 }
 
 function renderKpis() {
@@ -478,7 +514,7 @@ function renderRoundsTable() {
       <td class="number-cell">${formatNumber.format(row.codeLinesChanged)}</td>
       <td class="number-cell">${formatNumber.format(row.totalTokens)}</td>
       <td><span class="status-pill ${row.isReverted ? "reverted" : ""}">${row.isReverted ? "已撤销" : "有效"}</span></td>
-      <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(row.promptText || "-")}</td>
+      <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(displayPrompt(row.promptText))}</td>
       <td>
         <button class="link-button" type="button" data-edit-round="${row.id}">编辑</button>
         <button class="link-button danger-link" type="button" data-delete-round="${row.id}">删除</button>
@@ -504,11 +540,11 @@ function renderRoundsTableDashboard() {
       <td class="number-cell">${formatNumber.format(row.totalTokens)}</td>
       <td>${renderTokenStatus(row)}</td>
       <td>${escapeHtml(row.tokenMatchQuality || "-")}</td>
-      <td><span class="status-pill ${row.isReverted ? "reverted" : ""}">${row.isReverted ? "宸叉挙閿€" : "鏈夋晥"}</span></td>
-      <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(row.promptText || "-")}</td>
+      <td><span class="status-pill ${row.isReverted ? "reverted" : ""}">${row.isReverted ? "已撤销" : "有效"}</span></td>
+      <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(displayPrompt(row.promptText))}</td>
       <td>
-        <button class="link-button" type="button" data-edit-round="${row.id}">缂栬緫</button>
-        <button class="link-button danger-link" type="button" data-delete-round="${row.id}">鍒犻櫎</button>
+        <button class="link-button" type="button" data-edit-round="${row.id}">编辑</button>
+        <button class="link-button danger-link" type="button" data-delete-round="${row.id}">删除</button>
       </td>
     </tr>
   `).join("") || emptyRow(14);
@@ -523,6 +559,13 @@ function renderTokenStatus(row) {
     .filter(Boolean)
     .join(" / ");
   return `<span class="status-pill ${className}" title="${escapeHtml(title)}">${escapeHtml(status)}</span>`;
+}
+
+function displayPrompt(value) {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  if (/^\?{2,}$/u.test(text)) return "内容不可读";
+  return text;
 }
 
 function timeDrilldown(value, requirementId) {

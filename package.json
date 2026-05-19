@@ -10,6 +10,8 @@
     "dashboard:dev": "tsx src/dashboard-server.ts",
     "dashboard:start": "node dist/dashboard-server.js",
     "start": "node dist/index.js",
+    "auto-sync": "tsx scripts/auto-sync-loop.ts",
+    "auto-sync:once": "tsx scripts/auto-sync-loop.ts --once",
     "sync:online": "tsx scripts/sync-to-online.ts",
     "sync:online:dry": "tsx scripts/sync-to-online.ts --dry-run",
     "tokens:sync": "tsx scripts/sync-token-usage.ts",
