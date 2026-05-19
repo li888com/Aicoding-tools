@@ -162,6 +162,19 @@ try {
       throw new Error(`Dashboard proxy did not normalize summary: ${JSON.stringify(summary)}`);
     }
 
+    const syncStatusResponse = await fetch(`${baseUrl}/api/sync-status`, {
+      headers: {
+        Cookie: cookie
+      }
+    });
+    if (!syncStatusResponse.ok) {
+      throw new Error(`/api/sync-status should stay local, got ${syncStatusResponse.status}: ${await syncStatusResponse.text()}`);
+    }
+    const syncStatus = await syncStatusResponse.json() as Record<string, unknown>;
+    if (!("state" in syncStatus) || proxiedPaths.some((path) => path.includes("/sync-status"))) {
+      throw new Error(`/api/sync-status was unexpectedly proxied: ${JSON.stringify({ syncStatus, proxiedPaths })}`);
+    }
+
     console.log(JSON.stringify({
       ok: true,
       proxiedPaths,

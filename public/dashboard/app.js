@@ -215,14 +215,7 @@ async function loadPageData() {
     state.summary = summary;
     state.requirements = requirements;
     state.models = models;
-    state.syncStatus = await api("/api/sync-status").catch((error) => ({
-      running: false,
-      stale: false,
-      state: {
-        status: "unavailable",
-        lastError: error instanceof Error ? error.message : "sync status unavailable"
-      }
-    }));
+    state.syncStatus = await api("/api/sync-status").catch((error) => buildUnavailableSyncStatus(error));
   } else if (page === "requirements") {
     state.requirements = await api(`/api/requirements${query}`);
   } else if (page === "models") {
@@ -346,6 +339,11 @@ function renderSyncStatus() {
   if (!payload) return;
 
   const syncState = payload.state ?? {};
+  if (syncState.status === "not_configured") {
+    $("#syncStatusPanel").innerHTML = "";
+    return;
+  }
+
   const status = payload.running ? "运行中" : payload.stale ? "心跳过期" : syncState.status || "未运行";
   const lastToken = syncState.lastTokenSyncAt ? formatDate(syncState.lastTokenSyncAt) : "-";
   const tokenSince = syncState.lastTokenSyncSince ? formatDate(syncState.lastTokenSyncSince) : "-";
@@ -392,6 +390,19 @@ function renderSyncStatus() {
       </div>
     </article>
   `;
+}
+
+function buildUnavailableSyncStatus(error) {
+  const message = error instanceof Error ? error.message : String(error || "sync status unavailable");
+  const notFound = message.includes("\"not_found\"") || message.includes("not_found") || message.includes("404");
+  return {
+    running: false,
+    stale: false,
+    state: {
+      status: notFound ? "not_configured" : "unavailable",
+      lastError: notFound ? null : message
+    }
+  };
 }
 
 function renderKpis() {

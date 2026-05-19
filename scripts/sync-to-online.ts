@@ -6,7 +6,7 @@ type SyncStatus = "pending" | "synced" | "skipped" | "failed";
 
 type SyncState = {
   status: SyncStatus;
-  onlineId?: number;
+  onlineId?: number | string;
   syncedAt?: string;
   error?: string;
   failedAttempts?: number;
@@ -131,10 +131,6 @@ const baseUrl = (process.env.SYNC_API_BASE_URL || "https://ai-test.sbtjt.com/api
 const token = process.env.SYNC_API_TOKEN?.trim();
 
 async function main(): Promise<void> {
-  if (!dryRun && !token) {
-    throw new Error("SYNC_API_TOKEN is required unless --dry-run is used.");
-  }
-
   const data = await loadData();
   const report: SyncReport = {
     requirements: 0,
@@ -195,11 +191,11 @@ async function syncRequirements(data: StorageData, report: SyncReport): Promise<
   }
 }
 
-async function syncRounds(data: StorageData, idMap: Map<number, number>, report: SyncReport): Promise<void> {
+async function syncRounds(data: StorageData, idMap: Map<number, number | string>, report: SyncReport): Promise<void> {
   const requirementsById = new Map((data.requirements || []).map((item) => [item.requirementId, item]));
 
   for (const round of data.rounds || []) {
-    if (!shouldUpload(round, report)) continue;
+    if (!shouldUpload(round, report) && !isSyncedRoundMissingOnlineId(round)) continue;
     if (isLimitReached(report)) break;
     if (isTestRound(round)) {
       markSkipped(round, "Skipped test or verification round.");
@@ -262,7 +258,11 @@ async function syncRounds(data: StorageData, idMap: Map<number, number>, report:
   }
 }
 
-async function syncRoundReverts(data: StorageData, idMap: Map<number, number>, report: SyncReport): Promise<void> {
+function isSyncedRoundMissingOnlineId(round: Round): boolean {
+  return round._sync?.status === "synced" && round._sync.onlineId === undefined;
+}
+
+async function syncRoundReverts(data: StorageData, idMap: Map<number, number | string>, report: SyncReport): Promise<void> {
   for (const revert of data.roundReverts || []) {
     if (!shouldUpload(revert, report)) continue;
     if (isLimitReached(report)) break;
@@ -307,7 +307,7 @@ async function syncRoundReverts(data: StorageData, idMap: Map<number, number>, r
   }
 }
 
-async function syncTokenUsageEvents(data: StorageData, idMap: Map<number, number>, report: SyncReport): Promise<void> {
+async function syncTokenUsageEvents(data: StorageData, idMap: Map<number, number | string>, report: SyncReport): Promise<void> {
   for (const event of data.tokenUsageEvents || []) {
     if (!shouldUpload(event, report)) continue;
     if (isLimitReached(report)) break;
@@ -370,7 +370,7 @@ async function uploadItem<T extends { _sync?: SyncState }>(
   report: SyncReport,
   key: keyof SyncReport,
   upload: () => Promise<unknown>,
-  onlineId?: number
+  onlineId?: number | string
 ): Promise<void> {
   try {
     if (dryRun) {
@@ -380,7 +380,7 @@ async function uploadItem<T extends { _sync?: SyncState }>(
     }
 
     const result = await upload();
-    const returnedId = typeof result === "number" ? result : onlineId;
+    const returnedId = typeof result === "number" || typeof result === "string" ? result : onlineId;
     markSynced(item, returnedId);
     report[key] += 1;
     report.processed += 1;
@@ -414,8 +414,8 @@ async function request<T>(path: string, method: "POST" | "PUT", body: Record<str
   return parsed.data as T;
 }
 
-function buildRoundIdMap(rounds: Round[]): Map<number, number> {
-  const idMap = new Map<number, number>();
+function buildRoundIdMap(rounds: Round[]): Map<number, number | string> {
+  const idMap = new Map<number, number | string>();
   for (const round of rounds) {
     if (round._sync?.onlineId) {
       idMap.set(round.id, round._sync.onlineId);
@@ -492,7 +492,7 @@ function numberValue(value: unknown): number {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function markSynced(item: { _sync?: SyncState }, onlineId?: number): void {
+function markSynced(item: { _sync?: SyncState }, onlineId?: number | string): void {
   item._sync = {
     status: "synced",
     ...(onlineId !== undefined ? { onlineId } : {}),
@@ -529,12 +529,20 @@ function mapRequirementStatus(status: Requirement["status"]): string {
   return status;
 }
 
-function parseOnlineId(value: number | string | undefined, label: string): number {
-  const id = typeof value === "string" ? Number(value) : value;
-  if (!Number.isSafeInteger(id)) {
+function parseOnlineId(value: number | string | undefined, label: string): number | string {
+  if (typeof value === "number" && Number.isSafeInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+  if (typeof value !== "string" || !value.trim()) {
     throw new Error(`Missing or invalid ${label}.`);
   }
-  return id;
+  return value;
 }
 
 function printReport(report: SyncReport): void {
