@@ -140,22 +140,6 @@ async function computeTokenSince(): Promise<{ since: string; source: "checkpoint
 }
 
 async function runOnlineSync(): Promise<void> {
-  if (!process.env.SYNC_API_TOKEN?.trim()) {
-    await localStorage.patchAutoSyncState({
-      workerId,
-      lastOnlineSyncAt: new Date().toISOString(),
-      lastOnlineSyncStatus: "skipped",
-      lastOnlineSyncSummary: {
-        skipped: true,
-        processed: 0,
-        limit: args.onlineLimit,
-        reason: "SYNC_API_TOKEN is not configured",
-      },
-      lastError: null,
-    });
-    return;
-  }
-
   const result = await runScript("scripts/sync-to-online.ts", ["--limit", String(args.onlineLimit)]);
   const summary = parseOnlineSyncSummary(result.stdout);
   await localStorage.patchAutoSyncState({

@@ -14,6 +14,14 @@ Use `record_ai_coding_round` for normal implementation, investigation, and docum
 
 Record even when no code changed.
 
+After the MCP record call succeeds, run one local sync pass before the final response:
+
+```bash
+npm run auto-sync:once
+```
+
+This pass scans recent token logs and uploads pending local records to the configured online API. If `SYNC_API_BASE_URL` is configured, it is used as the online write endpoint. `SYNC_API_TOKEN` is optional; when the backend does not require authentication, the upload runs without an Authorization header.
+
 If the MCP call fails or the server is unavailable, say so briefly in the final response.
 
 ## Requirement Id

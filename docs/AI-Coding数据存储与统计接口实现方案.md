@@ -1376,6 +1376,8 @@ powershell -ExecutionPolicy Bypass -File scripts/start-auto-sync.ps1
 
 ## 16. 当前落地状态与后续收尾
 
+线上同步的具体操作步骤见：[AI-Coding本地数据同步线上使用说明.md](AI-Coding本地数据同步线上使用说明.md)。
+
 ### 16.1 已落地
 
 MCP Toolbox 本地侧已完成：
