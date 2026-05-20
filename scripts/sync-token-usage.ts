@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import path from "node:path";
+import initSqlJs from "sql.js";
 import { closePool } from "../src/database.js";
 import * as localStorage from "../src/local-storage.js";
 
@@ -95,6 +96,7 @@ type SyncResult = {
 };
 
 const args = parseArgs(process.argv.slice(2));
+const warnings = new Set<string>();
 
 try {
   const rounds = await loadPendingRounds(args);
@@ -129,7 +131,8 @@ try {
     ok: true,
     dryRun: args.dryRun,
     roundsChecked: rounds.length,
-    results
+    results,
+    warnings: Array.from(warnings)
   }, null, 2));
 } finally {
   await closePool();
@@ -147,6 +150,18 @@ async function syncRound(round: RoundRow, client: ClientName, args: Args): Promi
     }
 
     if (candidates.length > 1) {
+      const selected = await selectBestCandidate(round, client, candidates);
+      if (selected) {
+        await applyCandidate(round.id, client, selected, args.dryRun);
+        return {
+          roundId: round.id,
+          status: "synced",
+          client,
+          totalTokens: selected.totalTokens,
+          note: `${selected.note ?? "Token usage matched"}; auto-selected from ${candidates.length} candidates`
+        };
+      }
+
       await saveCandidates(round.id, client, candidates, args.dryRun);
       await markRound(round.id, "ambiguous", `${candidates.length} ${client} token usage events matched`, args.dryRun);
       return { roundId: round.id, status: "ambiguous", client, note: `${candidates.length} candidates` };
@@ -221,6 +236,62 @@ async function findExistingTokenEventRound(
   return value === undefined || value === null ? null : Number(value);
 }
 
+async function selectBestCandidate(
+  round: RoundRow,
+  client: ClientName,
+  candidates: RoundCandidate[]
+): Promise<RoundCandidate | null> {
+  const available: Array<{ candidate: RoundCandidate; score: number }> = [];
+
+  for (const candidate of candidates) {
+    const existingRoundId = await findExistingTokenEventRound(client, candidate);
+    if (existingRoundId !== null && existingRoundId !== round.id) continue;
+    available.push({
+      candidate,
+      score: scoreCandidate(round, candidate)
+    });
+  }
+
+  available.sort((left, right) => right.score - left.score);
+  const best = available[0];
+  if (!best) return null;
+  const second = available[1];
+
+  if (best.candidate.matchQuality === "exact_tool_call" || best.candidate.matchQuality === "turn_id") {
+    return best.candidate;
+  }
+
+  if (!second || best.score - second.score >= 120) {
+    return best.candidate;
+  }
+
+  return null;
+}
+
+function scoreCandidate(round: RoundRow, candidate: RoundCandidate): number {
+  const qualityScore = candidate.matchQuality === "exact_tool_call"
+    ? 1000
+    : candidate.matchQuality === "turn_id"
+      ? 800
+      : candidate.matchQuality === "prompt_tool_call"
+        ? 650
+        : 300;
+
+  const roundStart = toDate(round.started_at).getTime();
+  const roundEnd = toDate(round.ended_at).getTime();
+  const candidateStart = candidate.startedAt?.getTime() ?? candidate.endedAt?.getTime() ?? roundStart;
+  const candidateEnd = candidate.endedAt?.getTime() ?? candidate.startedAt?.getTime() ?? candidateStart;
+  const overlapMs = Math.max(0, Math.min(roundEnd, candidateEnd) - Math.max(roundStart, candidateStart));
+  const roundDurationMs = Math.max(roundEnd - roundStart, 1);
+  const overlapScore = Math.min((overlapMs / roundDurationMs) * 300, 300);
+  const roundMid = (roundStart + roundEnd) / 2;
+  const candidateMid = (candidateStart + candidateEnd) / 2;
+  const distanceMinutes = Math.abs(candidateMid - roundMid) / 60_000;
+  const distanceScore = Math.max(200 - distanceMinutes * 20, 0);
+
+  return qualityScore + overlapScore + distanceScore;
+}
+
 async function loadPendingRounds(args: Args): Promise<RoundRow[]> {
   const rounds = await localStorage.getRounds();
   const reverts = await localStorage.getRoundReverts();
@@ -233,7 +304,7 @@ async function loadPendingRounds(args: Args): Promise<RoundRow[]> {
 
   const pending = rounds
     .filter((round) => !revertedRoundIds.has(round.id))
-    .filter((round) => round.totalTokens === 0 || ["pending", "not_found", "failed"].includes(String(round.tokenSyncStatus)))
+    .filter((round) => round.totalTokens === 0 || ["pending", "not_found", "ambiguous", "failed"].includes(String(round.tokenSyncStatus)))
     .filter((round) => args.roundId === undefined || round.id === args.roundId)
     .filter((round) => {
       if (!args.project) return true;
@@ -772,10 +843,51 @@ async function runSqliteQuery(filePath: string, sql: string): Promise<Array<Reco
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execFileAsync = promisify(execFile);
-  const { stdout } = await execFileAsync("sqlite3", ["-json", filePath, sql], {
-    maxBuffer: 20 * 1024 * 1024
-  });
+  let stdout = "";
+  try {
+    const result = await execFileAsync("sqlite3", ["-json", filePath, sql], {
+      maxBuffer: 20 * 1024 * 1024
+    });
+    stdout = result.stdout;
+  } catch (error) {
+    if (isMissingSqliteCliError(error)) {
+      warnings.add("sqlite3 CLI is not available; using sql.js fallback for Codex SQLite token log lookup.");
+      return runSqlJsQuery(filePath, sql);
+    }
+    throw error;
+  }
   return stdout.trim() ? JSON.parse(stdout) : [];
+}
+
+async function runSqlJsQuery(filePath: string, sql: string): Promise<Array<Record<string, unknown>>> {
+  const SQL = await initSqlJs();
+  const buffer = await readFile(filePath);
+  const db = new SQL.Database(buffer);
+  try {
+    const results = db.exec(sql);
+    const rows: Array<Record<string, unknown>> = [];
+    for (const result of results) {
+      for (const values of result.values) {
+        const row: Record<string, unknown> = {};
+        result.columns.forEach((column, index) => {
+          row[column] = values[index];
+        });
+        rows.push(row);
+      }
+    }
+    return rows;
+  } finally {
+    db.close();
+  }
+}
+
+function isMissingSqliteCliError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
 }
 
 async function findCodexThreadIdsForProject(projectPath: string | undefined, startedAt: Date, endedAt: Date): Promise<string[]> {

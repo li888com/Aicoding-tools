@@ -212,7 +212,7 @@ async function loadPageData() {
       api(`/api/requirements${query}`),
       api(`/api/models${query}`)
     ]);
-    state.summary = summary;
+    state.summary = normalizeSummary(summary);
     state.requirements = requirements;
     state.models = models;
     state.syncStatus = await api("/api/sync-status").catch((error) => buildUnavailableSyncStatus(error));
@@ -270,6 +270,54 @@ async function loadCorrections() {
   if (roundId) params.set("roundId", roundId);
   params.set("limit", limit);
   state.corrections = await api(`/api/corrections?${params.toString()}`);
+}
+
+function normalizeSummary(summary) {
+  const normalized = { ...(summary || {}) };
+  const roundCount = toFiniteNumber(normalized.roundCount);
+  const tokenSyncedRounds = toFiniteNumber(normalized.tokenSyncedRounds);
+  const tokenIssueRounds = toFiniteNumber(normalized.tokenSyncIssueRounds);
+  const tokenMissingRounds = toFiniteNumber(normalized.tokenMissingRounds);
+
+  const hasDetailedIssueFields =
+    normalized.tokenPendingRounds !== undefined ||
+    normalized.tokenNotFoundRounds !== undefined ||
+    normalized.tokenAmbiguousRounds !== undefined ||
+    normalized.tokenFailedRounds !== undefined;
+
+  normalized.tokenPendingRounds = normalized.tokenPendingRounds ?? (
+    tokenIssueRounds > 0 ? 0 : tokenMissingRounds
+  );
+  normalized.tokenNotFoundRounds = normalized.tokenNotFoundRounds ?? 0;
+  normalized.tokenAmbiguousRounds = normalized.tokenAmbiguousRounds ?? (
+    hasDetailedIssueFields ? 0 : tokenIssueRounds
+  );
+  normalized.tokenFailedRounds = normalized.tokenFailedRounds ?? 0;
+  normalized.tokenCompletenessRate = normalized.tokenCompletenessRate ?? (
+    roundCount > 0 ? tokenSyncedRounds / roundCount : null
+  );
+  normalized.lastTokenSyncedAt = normalized.lastTokenSyncedAt ?? null;
+  normalized.lastOnlineSyncedAt = normalized.lastOnlineSyncedAt ?? null;
+  normalized.fileCategorySummary = normalizeFileCategorySummary(normalized.fileCategorySummary);
+
+  return normalized;
+}
+
+function normalizeFileCategorySummary(summary) {
+  const source = summary && typeof summary === "object" ? summary : {};
+  return {
+    sourceLinesChanged: toFiniteNumber(source.sourceLinesChanged),
+    docLinesChanged: toFiniteNumber(source.docLinesChanged),
+    configLinesChanged: toFiniteNumber(source.configLinesChanged),
+    testLinesChanged: toFiniteNumber(source.testLinesChanged),
+    generatedLinesChanged: toFiniteNumber(source.generatedLinesChanged),
+    otherLinesChanged: toFiniteNumber(source.otherLinesChanged)
+  };
+}
+
+function toFiniteNumber(value) {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function renderTokenQuality() {

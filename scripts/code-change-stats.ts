@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 
 type FileCategory = "source" | "doc" | "config" | "test" | "generated" | "other";
@@ -25,7 +26,9 @@ const { stdout } = await execFileAsync("git", ["-c", "core.quotePath=false", "di
   maxBuffer: 20 * 1024 * 1024,
 });
 
-const files = parseNumstat(stdout);
+const trackedFiles = parseNumstat(stdout);
+const untrackedFiles = args.includeUntracked ? await getUntrackedFileStats() : [];
+const files = [...trackedFiles, ...untrackedFiles];
 const categories = summarize(files);
 const output = {
   ok: true,
@@ -63,6 +66,40 @@ function parseNumstatNumber(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+async function getUntrackedFileStats(): Promise<FileStat[]> {
+  const { stdout } = await execFileAsync("git", ["-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard"], {
+    cwd: process.cwd(),
+    maxBuffer: 20 * 1024 * 1024,
+  });
+
+  const files = stdout.split(/\r?\n/u).filter(Boolean);
+  const stats: FileStat[] = [];
+  for (const filePath of files) {
+    const fileStat = await stat(filePath).catch(() => null);
+    if (!fileStat?.isFile()) continue;
+    const lineCount = await countTextLines(filePath);
+    if (lineCount === null) continue;
+    stats.push({
+      path: filePath,
+      category: classifyPath(filePath),
+      linesAdded: lineCount,
+      linesDeleted: 0,
+      codeLinesChanged: lineCount,
+    });
+  }
+  return stats;
+}
+
+async function countTextLines(filePath: string): Promise<number | null> {
+  const buffer = await readFile(filePath).catch(() => null);
+  if (!buffer) return null;
+  if (buffer.includes(0)) return null;
+  const content = buffer.toString("utf8");
+  if (content.length === 0) return 0;
+  const newlineCount = content.match(/\n/gu)?.length ?? 0;
+  return content.endsWith("\n") ? newlineCount : newlineCount + 1;
+}
+
 function summarize(files: FileStat[]): Record<FileCategory, CategoryStats> {
   const empty = (): CategoryStats => ({ files: 0, linesAdded: 0, linesDeleted: 0, codeLinesChanged: 0 });
   const result: Record<FileCategory, CategoryStats> = {
@@ -87,7 +124,7 @@ function summarize(files: FileStat[]): Record<FileCategory, CategoryStats> {
 
 function toMetadata(categories: Record<FileCategory, CategoryStats>, files: FileStat[]) {
   return {
-    codeStatsSource: "git diff --numstat + file category classifier",
+    codeStatsSource: "git diff --numstat + git ls-files --others --exclude-standard + file category classifier",
     fileCategoryStats: categories,
     fileCategorySummary: {
       sourceLinesChanged: categories.source.codeLinesChanged,
@@ -157,9 +194,10 @@ function classifyPath(filePath: string): FileCategory {
   return "other";
 }
 
-function parseArgs(argv: string[]): { includeFiles: boolean; metadata: boolean; gitArgs: string[] } {
+function parseArgs(argv: string[]): { includeFiles: boolean; includeUntracked: boolean; metadata: boolean; gitArgs: string[] } {
   const parsed = {
     includeFiles: false,
+    includeUntracked: true,
     metadata: false,
     gitArgs: [] as string[],
   };
@@ -167,6 +205,8 @@ function parseArgs(argv: string[]): { includeFiles: boolean; metadata: boolean; 
   for (const arg of argv) {
     if (arg === "--files") {
       parsed.includeFiles = true;
+    } else if (arg === "--no-untracked") {
+      parsed.includeUntracked = false;
     } else if (arg === "--metadata") {
       parsed.metadata = true;
     } else {
