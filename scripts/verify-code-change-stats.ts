@@ -17,6 +17,11 @@ const payload = JSON.parse(stdout) as {
   filesChanged?: number;
   codeLinesChanged?: number;
   metadata?: {
+    codeStatsPrecision?: string;
+    trackedDiffNumstat?: string;
+    trackedFiles?: unknown[];
+    untrackedFiles?: unknown[];
+    includesUntracked?: boolean;
     fileCategoryStats?: Record<string, unknown>;
     fileCategorySummary?: Record<string, unknown>;
     fileCategoryFiles?: unknown[];
@@ -28,6 +33,21 @@ if (payload.ok !== true) {
 }
 if (!payload.metadata?.fileCategoryStats || !payload.metadata.fileCategorySummary) {
   throw new Error(`Missing metadata category stats: ${stdout}`);
+}
+if (payload.metadata.codeStatsPrecision !== "workspace-cumulative") {
+  throw new Error(`Unexpected codeStatsPrecision: ${stdout}`);
+}
+if (typeof payload.metadata.trackedDiffNumstat !== "string") {
+  throw new Error(`Missing trackedDiffNumstat: ${stdout}`);
+}
+if (!Array.isArray(payload.metadata.trackedFiles)) {
+  throw new Error(`Missing trackedFiles: ${stdout}`);
+}
+if (!Array.isArray(payload.metadata.untrackedFiles)) {
+  throw new Error(`Missing untrackedFiles: ${stdout}`);
+}
+if (payload.metadata.includesUntracked !== true) {
+  throw new Error(`Expected includesUntracked=true: ${stdout}`);
 }
 for (const key of [
   "sourceLinesChanged",

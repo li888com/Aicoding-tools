@@ -19,8 +19,33 @@ type FileStat = {
   codeLinesChanged: number;
 };
 
+type FileSnapshot = {
+  path: string;
+  exists: boolean;
+  text: boolean;
+  lines: number;
+};
+
+type Snapshot = {
+  version: 1;
+  createdAt: string;
+  files: FileSnapshot[];
+};
+
 const execFileAsync = promisify(execFile);
 const args = parseArgs(process.argv.slice(2));
+if (args.snapshot) {
+  console.log(JSON.stringify(await createSnapshot(), null, 2));
+  process.exit(0);
+}
+
+if (args.sinceSnapshot) {
+  const snapshot = JSON.parse(await readFile(args.sinceSnapshot, "utf8")) as Snapshot;
+  const files = await getStatsSinceSnapshot(snapshot);
+  printStats(files, [], [], "", "snapshot-diff");
+  process.exit(0);
+}
+
 const { stdout } = await execFileAsync("git", ["-c", "core.quotePath=false", "diff", "--numstat", ...args.gitArgs], {
   cwd: process.cwd(),
   maxBuffer: 20 * 1024 * 1024,
@@ -29,6 +54,15 @@ const { stdout } = await execFileAsync("git", ["-c", "core.quotePath=false", "di
 const trackedFiles = parseNumstat(stdout);
 const untrackedFiles = args.includeUntracked ? await getUntrackedFileStats() : [];
 const files = [...trackedFiles, ...untrackedFiles];
+printStats(files, trackedFiles, untrackedFiles, stdout, "workspace-cumulative");
+
+function printStats(
+  files: FileStat[],
+  trackedFiles: FileStat[],
+  untrackedFiles: FileStat[],
+  trackedDiffNumstat: string,
+  precision: "workspace-cumulative" | "snapshot-diff"
+) {
 const categories = summarize(files);
 const output = {
   ok: true,
@@ -36,11 +70,12 @@ const output = {
   linesAdded: files.reduce((sum, file) => sum + file.linesAdded, 0),
   linesDeleted: files.reduce((sum, file) => sum + file.linesDeleted, 0),
   codeLinesChanged: files.reduce((sum, file) => sum + file.codeLinesChanged, 0),
-  ...(args.metadata ? { metadata: toMetadata(categories, files) } : { categories }),
+    ...(args.metadata ? { metadata: toMetadata(categories, files, trackedFiles, untrackedFiles, trackedDiffNumstat, precision) } : { categories }),
   files: args.includeFiles ? files : undefined,
 };
 
 console.log(JSON.stringify(output, null, 2));
+}
 
 function parseNumstat(value: string): FileStat[] {
   return value
@@ -64,6 +99,80 @@ function parseNumstat(value: string): FileStat[] {
 function parseNumstatNumber(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function createSnapshot(): Promise<Snapshot> {
+  const paths = await listWorkspaceFiles();
+  const files: FileSnapshot[] = [];
+  for (const filePath of paths) {
+    const lineCount = await countTextLines(filePath);
+    files.push({
+      path: filePath,
+      exists: true,
+      text: lineCount !== null,
+      lines: lineCount ?? 0,
+    });
+  }
+  return {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    files,
+  };
+}
+
+async function getStatsSinceSnapshot(snapshot: Snapshot): Promise<FileStat[]> {
+  const before = new Map(snapshot.files.map((file) => [file.path, file]));
+  const currentPaths = await listWorkspaceFiles();
+  const allPaths = new Set([...before.keys(), ...currentPaths]);
+  const stats: FileStat[] = [];
+
+  for (const filePath of Array.from(allPaths).sort()) {
+    const previous = before.get(filePath);
+    const currentLineCount = await countTextLines(filePath);
+    const currentExists = currentLineCount !== null;
+    const previousLines = previous?.exists && previous.text ? previous.lines : 0;
+    const currentLines = currentExists ? currentLineCount : 0;
+    const delta = currentLines - previousLines;
+
+    if (!previous && currentExists) {
+      stats.push(toFileStat(filePath, currentLines, 0));
+    } else if (previous && !currentExists) {
+      stats.push(toFileStat(filePath, 0, previousLines));
+    } else if (delta > 0) {
+      stats.push(toFileStat(filePath, delta, 0));
+    } else if (delta < 0) {
+      stats.push(toFileStat(filePath, 0, Math.abs(delta)));
+    }
+  }
+
+  return stats;
+}
+
+async function listWorkspaceFiles(): Promise<string[]> {
+  const { stdout } = await execFileAsync("git", [
+    "-c",
+    "core.quotePath=false",
+    "ls-files",
+    "--cached",
+    "--modified",
+    "--others",
+    "--exclude-standard",
+  ], {
+    cwd: process.cwd(),
+    maxBuffer: 20 * 1024 * 1024,
+  });
+
+  return Array.from(new Set(stdout.split(/\r?\n/u).filter(Boolean))).sort();
+}
+
+function toFileStat(filePath: string, linesAdded: number, linesDeleted: number): FileStat {
+  return {
+    path: filePath,
+    category: classifyPath(filePath),
+    linesAdded,
+    linesDeleted,
+    codeLinesChanged: linesAdded + linesDeleted,
+  };
 }
 
 async function getUntrackedFileStats(): Promise<FileStat[]> {
@@ -122,9 +231,21 @@ function summarize(files: FileStat[]): Record<FileCategory, CategoryStats> {
   return result;
 }
 
-function toMetadata(categories: Record<FileCategory, CategoryStats>, files: FileStat[]) {
+function toMetadata(
+  categories: Record<FileCategory, CategoryStats>,
+  files: FileStat[],
+  trackedFiles: FileStat[],
+  untrackedFiles: FileStat[],
+  trackedDiffNumstat: string,
+  precision: "workspace-cumulative" | "snapshot-diff"
+) {
   return {
     codeStatsSource: "git diff --numstat + git ls-files --others --exclude-standard + file category classifier",
+    codeStatsPrecision: precision,
+    trackedDiffNumstat: trackedDiffNumstat.trimEnd(),
+    trackedFiles: trackedFiles.map(toMetadataFile),
+    untrackedFiles: untrackedFiles.map(toMetadataFile),
+    includesUntracked: true,
     fileCategoryStats: categories,
     fileCategorySummary: {
       sourceLinesChanged: categories.source.codeLinesChanged,
@@ -134,11 +255,17 @@ function toMetadata(categories: Record<FileCategory, CategoryStats>, files: File
       generatedLinesChanged: categories.generated.codeLinesChanged,
       otherLinesChanged: categories.other.codeLinesChanged,
     },
-    fileCategoryFiles: files.map((file) => ({
-      path: file.path,
-      category: file.category,
-      codeLinesChanged: file.codeLinesChanged,
-    })),
+    fileCategoryFiles: files.map(toMetadataFile),
+  };
+}
+
+function toMetadataFile(file: FileStat) {
+  return {
+    path: file.path,
+    category: file.category,
+    linesAdded: file.linesAdded,
+    linesDeleted: file.linesDeleted,
+    codeLinesChanged: file.codeLinesChanged,
   };
 }
 
@@ -194,21 +321,39 @@ function classifyPath(filePath: string): FileCategory {
   return "other";
 }
 
-function parseArgs(argv: string[]): { includeFiles: boolean; includeUntracked: boolean; metadata: boolean; gitArgs: string[] } {
+function parseArgs(argv: string[]): {
+  includeFiles: boolean;
+  includeUntracked: boolean;
+  metadata: boolean;
+  snapshot: boolean;
+  sinceSnapshot?: string;
+  gitArgs: string[];
+} {
   const parsed = {
     includeFiles: false,
     includeUntracked: true,
     metadata: false,
+    snapshot: false,
+    sinceSnapshot: undefined as string | undefined,
     gitArgs: [] as string[],
   };
 
-  for (const arg of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
     if (arg === "--files") {
       parsed.includeFiles = true;
     } else if (arg === "--no-untracked") {
       parsed.includeUntracked = false;
     } else if (arg === "--metadata") {
       parsed.metadata = true;
+    } else if (arg === "--snapshot") {
+      parsed.snapshot = true;
+    } else if (arg === "--since-snapshot") {
+      parsed.sinceSnapshot = argv[index + 1];
+      if (!parsed.sinceSnapshot) {
+        throw new Error("--since-snapshot requires a snapshot JSON file path");
+      }
+      index += 1;
     } else {
       parsed.gitArgs.push(arg);
     }
