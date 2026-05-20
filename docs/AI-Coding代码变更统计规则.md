@@ -265,7 +265,57 @@ Dashboard 可同时展示两种指标：
 }
 ```
 
-## 9. 推荐落地步骤
+## 9. 确认类和问答类轮次
+
+有些用户请求只是确认、解释或追问，例如：
+
+```text
+你现在是对的
+你确定有 297 行吗
+为什么没有跑 MCP
+```
+
+这类轮次通常不会产生新的文件改动。
+
+如果上一轮刚创建了未跟踪文件，而这一轮只是确认，不能再次把上一轮的未跟踪文件算进本轮。
+
+错误示例：
+
+```text
+第 1 轮：新建统计规则文档，新增 297 行。
+第 2 轮：用户说“你现在是对的”，没有任何文件改动。
+
+错误记录：
+第 2 轮仍然记录 297 行。
+```
+
+正确记录：
+
+```text
+第 1 轮：297 行。
+第 2 轮：0 行。
+```
+
+因此规则是：
+
+1. 如果本轮没有执行文件写入、格式化、生成、删除等操作，应记录 `0`。
+2. 如果没有本轮 baseline，不能把当前工作区累计 diff 当作确认类轮次的变更。
+3. 对于解释、确认、排查类请求，如果只读文件或只运行查询命令，也应记录 `0`。
+4. 只有本轮实际修改了文件，才记录本轮新增/删除行数。
+
+metadata 建议：
+
+```json
+{
+  "metadata": {
+    "codeStatsSource": "no file edits in this round",
+    "codeStatsPrecision": "exact",
+    "roundChanged": 0
+  }
+}
+```
+
+## 10. 推荐落地步骤
 
 1. 保留当前 `scripts/code-change-stats.ts` 作为“工作区累计统计”能力。
 2. 新增 baseline 快照能力：
@@ -282,8 +332,9 @@ tsx scripts/code-change-stats.ts --since-snapshot .mcp-toolbox/round-baseline.js
 
 4. MCP 记录脚本 `scripts/call-record-round-via-mcp.ts` 改为使用单轮口径。
 5. Dashboard 继续展示 round 中已记录的单轮统计。
+6. 如果没有 baseline 且本轮没有文件写入操作，MCP 记录脚本必须记录 `0`，不能使用工作区累计 diff 兜底。
 
-## 10. 结论
+## 11. 结论
 
 代码变更统计必须区分：
 
@@ -294,4 +345,3 @@ tsx scripts/code-change-stats.ts --since-snapshot .mcp-toolbox/round-baseline.js
 当前 `710` 行是工作区累计变更，包含历史未提交文件和多个轮次的修改。
 
 如果要准确记录每轮贡献，必须引入“本轮开始 baseline”，用结束快照减开始快照。
-

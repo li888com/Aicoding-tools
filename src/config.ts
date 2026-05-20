@@ -72,3 +72,26 @@ export function getIpGuardConfig(): IpGuardConfig {
     password: process.env.IPGUARD_PASSWORD ?? "IPGUARD#dify202509",
   };
 }
+
+export type RequirementApiMode = "local" | "remote";
+
+export type RequirementApiConfig = {
+  mode: RequirementApiMode;
+  baseUrl: string | null;
+  token: string | null;
+  timeoutMs: number;
+};
+
+export function getRequirementApiConfig(): RequirementApiConfig {
+  const mode = (process.env.AI_CODING_REQUIREMENT_API_MODE?.trim() || "local").toLowerCase();
+  if (mode !== "local" && mode !== "remote") {
+    throw new Error("AI_CODING_REQUIREMENT_API_MODE must be local or remote");
+  }
+
+  return {
+    mode,
+    baseUrl: process.env.AI_CODING_REQUIREMENT_API_BASE_URL?.trim() || null,
+    token: process.env.AI_CODING_REQUIREMENT_API_TOKEN?.trim() || null,
+    timeoutMs: readNumber("AI_CODING_REQUIREMENT_API_TIMEOUT_MS", 10000),
+  };
+}

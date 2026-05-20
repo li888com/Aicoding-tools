@@ -2,6 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { closePool } from "./database.js";
+import { registerAiCodingRequirementTools } from "./tools/ai-coding-requirements.js";
 import { registerAiCodingStatsTools } from "./tools/ai-coding-stats.js";
 import { registerFeishuDocsTools } from "./tools/feishu-docs.js";
 import { registerFileDecryptTools } from "./tools/file-decrypt.js";
@@ -12,6 +13,7 @@ const server = new McpServer({
 });
 
 registerAiCodingStatsTools(server);
+registerAiCodingRequirementTools(server);
 registerFeishuDocsTools(server);
 registerFileDecryptTools(server);
 

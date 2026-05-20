@@ -652,7 +652,7 @@ function renderRoundsTable() {
       <td class="number-cell">${formatNumber.format(row.codeLinesChanged)}</td>
       <td class="number-cell">${formatNumber.format(row.totalTokens)}</td>
       <td>${renderRoundStatus(row)}</td>
-      <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(displayPrompt(row.promptText))}</td>
+      <td class="prompt-cell" title="${escapeHtml(displayPrompt(row.promptText))}">${escapeHtml(displayPrompt(row.promptText))}</td>
       <td>
         <button class="link-button" type="button" data-edit-round="${row.id}">编辑</button>
         <button class="link-button danger-link" type="button" data-delete-round="${row.id}">删除</button>
@@ -679,7 +679,7 @@ function renderRoundsTableDashboard() {
       <td>${renderTokenStatus(row)}</td>
       <td>${escapeHtml(row.tokenMatchQuality || "-")}</td>
       <td>${renderRoundStatus(row)}</td>
-      <td class="prompt-cell" title="${escapeHtml(row.promptText)}">${escapeHtml(displayPrompt(row.promptText))}</td>
+      <td class="prompt-cell" title="${escapeHtml(displayPrompt(row.promptText))}">${escapeHtml(displayPrompt(row.promptText))}</td>
       <td>
         <button class="link-button" type="button" data-edit-round="${row.id}">编辑</button>
         <button class="link-button danger-link" type="button" data-delete-round="${row.id}">删除</button>
@@ -743,8 +743,21 @@ function renderRoundStatus(row) {
 function displayPrompt(value) {
   const text = String(value || "").trim();
   if (!text) return "-";
-  if (/^\?{2,}$/u.test(text)) return "内容不可读";
+  if (isUnreadablePrompt(text)) return "内容不可读";
   return text;
+}
+
+function isUnreadablePrompt(text) {
+  if (/^\?{2,}$/u.test(text)) return true;
+  if (/\?{4,}/u.test(text)) return true;
+
+  const questionMarks = text.match(/\?/gu)?.length ?? 0;
+  if (questionMarks < 4) return false;
+
+  const compactLength = text.replace(/\s/gu, "").length;
+  if (compactLength === 0) return false;
+
+  return questionMarks / compactLength >= 0.4;
 }
 
 function timeDrilldown(value, requirementId) {

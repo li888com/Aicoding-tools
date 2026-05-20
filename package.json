@@ -28,6 +28,7 @@
     "test:tokens": "tsx scripts/verify-token-sync.ts",
     "test:code-stats": "tsx scripts/verify-code-change-stats.ts",
     "test:record-code-stats": "tsx scripts/verify-record-round-code-stats.ts",
+    "test:requirements": "tsx scripts/verify-requirement-selection.ts",
     "test:online-sync-file-categories": "tsx scripts/verify-online-sync-file-categories.ts",
     "test:feishu": "tsx scripts/verify-feishu-doc.ts",
     "test:mcp": "tsx scripts/verify-mcp-server.ts",
