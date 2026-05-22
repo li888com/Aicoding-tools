@@ -7,9 +7,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
+    "dev:ai-coding-stats": "tsx src/ai-coding-stats-server.ts",
     "dashboard:dev": "tsx src/dashboard-server.ts",
     "dashboard:start": "node dist/dashboard-server.js",
     "start": "node dist/index.js",
+    "start:ai-coding-stats": "node dist/ai-coding-stats-server.js",
     "auto-sync": "tsx scripts/auto-sync-loop.ts",
     "auto-sync:once": "tsx scripts/auto-sync-loop.ts --once",
     "sync:online": "tsx scripts/sync-to-online.ts",

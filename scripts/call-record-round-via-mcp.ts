@@ -37,7 +37,7 @@ for (const [key, value] of Object.entries(process.env)) {
 
 const transport = new StdioClientTransport({
   command: "node",
-  args: ["dist/index.js"],
+  args: [process.env.AI_CODING_STATS_MCP_ENTRY?.trim() || "dist/index.js"],
   cwd: process.cwd(),
   env,
   stderr: "pipe",
