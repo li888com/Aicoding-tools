@@ -1,0 +1,12 @@
+{
+  "employeeId": "00232924",
+  "userName": "",
+  "teamId": "",
+  "apiBaseUrl": "http://127.0.0.1:9906",
+  "accessToken": "",
+  "createdAt": "2026-05-21T21:24:04+08:00",
+  "updatedAt": "2026-05-21T22:54:16+08:00",
+  "externalSysKey": "",
+  "externalSysSecret": "",
+  "turnApiPath": "/ai-codingTurns"
+}

@@ -10,6 +10,8 @@ export type DashboardConfig = {
   dashboardApiBaseUrl: string;
   dashboardApiTimeoutMs: number;
   dashboardApiFallbackLocal: boolean;
+  gpmDemandApiUrl?: string;
+  gpmDemandApiTimeoutMs?: number;
 };
 
 function readNumber(name: string, fallback: number): number {
@@ -41,6 +43,8 @@ export function getDashboardConfig(): DashboardConfig {
     sessionTtlMs: readNumber("DASHBOARD_SESSION_TTL_HOURS", 12) * 60 * 60 * 1000,
     dashboardApiBaseUrl: (process.env.AI_CODING_DASHBOARD_API_BASE_URL ?? "http://localhost:9906/api/ai-coding/dashboard").replace(/\/+$/, ""),
     dashboardApiTimeoutMs: readNumber("AI_CODING_DASHBOARD_API_TIMEOUT_MS", 2000),
-    dashboardApiFallbackLocal: readBoolean("AI_CODING_DASHBOARD_API_FALLBACK_LOCAL", true)
+    dashboardApiFallbackLocal: readBoolean("AI_CODING_DASHBOARD_API_FALLBACK_LOCAL", true),
+    gpmDemandApiUrl: process.env.GPM_DEMAND_API_URL ?? "https://gpm-uat.sbtjt.com/api/plugins/sbt/consultantSettlement/demand",
+    gpmDemandApiTimeoutMs: readNumber("GPM_DEMAND_API_TIMEOUT_MS", 10000)
   };
 }

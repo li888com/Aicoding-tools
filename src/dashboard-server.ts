@@ -115,6 +115,11 @@ async function routeRequest(
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/plugins/sbt/consultantSettlement/demand") {
+    await proxyGpmDemandApi(request, response, config);
+    return;
+  }
+
   const authenticated = isAuthenticated(request, config);
 
   if (request.method === "GET" && url.pathname === "/api/session") {
@@ -1794,6 +1799,101 @@ function buildProxyHeaders(request: IncomingMessage): Headers {
   }
 
   return headers;
+}
+
+async function proxyGpmDemandApi(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: DashboardConfig
+): Promise<void> {
+  if (!config.gpmDemandApiUrl) {
+    sendJson(response, 503, {
+      code: 503,
+      msg: "GPM demand upstream is not configured",
+      data: null,
+      ok: false,
+      error: "gpm_demand_upstream_not_configured",
+    });
+    return;
+  }
+
+  const body = await readJsonBody(request);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.gpmDemandApiTimeoutMs ?? 10000);
+
+  try {
+    const headers = buildGpmDemandHeaders(request);
+    const upstreamResponse = await fetch(config.gpmDemandApiUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const upstreamBody = await upstreamResponse.text();
+    const upstreamContentType = upstreamResponse.headers.get("content-type") || "application/json; charset=utf-8";
+
+    if (upstreamResponse.ok) {
+      response.statusCode = upstreamResponse.status;
+      response.setHeader("Content-Type", upstreamContentType);
+      response.end(upstreamBody);
+      return;
+    }
+
+    sendJson(response, 424, {
+      code: 424,
+      msg: "GPM demand upstream request failed",
+      data: normalizeUpstreamErrorBody(upstreamBody, upstreamContentType),
+      ok: false,
+      error: "gpm_demand_upstream_failed",
+      upstream: {
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        url: config.gpmDemandApiUrl,
+      },
+    });
+  } catch (error) {
+    sendJson(response, 502, {
+      code: 502,
+      msg: error instanceof Error && error.name === "AbortError"
+        ? "GPM demand upstream request timed out"
+        : "GPM demand upstream is unavailable",
+      data: null,
+      ok: false,
+      error: error instanceof Error && error.name === "AbortError"
+        ? "gpm_demand_upstream_timeout"
+        : "gpm_demand_upstream_unavailable",
+      upstream: {
+        url: config.gpmDemandApiUrl,
+      },
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildGpmDemandHeaders(request: IncomingMessage): Headers {
+  const headers = new Headers({
+    "Accept": "application/json",
+    "Content-Type": "application/json; charset=utf-8",
+  });
+
+  const authorization = request.headers.authorization;
+  if (authorization) {
+    headers.set("Authorization", Array.isArray(authorization) ? authorization[0] : authorization);
+  }
+
+  return headers;
+}
+
+function normalizeUpstreamErrorBody(body: string, contentType: string): unknown {
+  if (!body.trim()) return null;
+  if (!contentType.toLowerCase().includes("application/json")) return body;
+
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return body;
+  }
 }
 
 function redirect(response: ServerResponse, location: string) {
